@@ -24,6 +24,7 @@ import {
   GitCompareArrows,
   FileText,
   Upload,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { NAV_ITEMS } from '../layout/navItems';
 import { useFinancial } from '../../context/FinancialContext';
@@ -63,6 +64,7 @@ interface CommandPaletteModalProps {
   onToggleFullscreen: () => void;
   onExportExcel: () => void;
   onExportPdf: () => void;
+  onOpenCustomPdfModal?: () => void;
   onExportDocx?: () => void;
   onExportSeasonalCsv?: () => void;
   onExportCsv: () => void;
@@ -93,6 +95,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
   onToggleFullscreen,
   onExportExcel,
   onExportPdf,
+  onOpenCustomPdfModal,
   onExportDocx,
   onExportSeasonalCsv,
   onExportCsv,
@@ -300,6 +303,22 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
           window.setTimeout(() => onExportPdf(), 80);
         },
       },
+      ...(onOpenCustomPdfModal
+        ? [
+            {
+              id: 'action-custom-pdf',
+              group: 'Actions rapides' as const,
+              label: 'Export PDF personnalisé (sélection de sections)',
+              description: 'Choisir les sections à inclure : Tableau de bord, PESTEL, Sensibilité 2D…',
+              keywords: 'exporter pdf personnalise sections tableau de bord pestel sensibilite choix',
+              icon: SlidersHorizontal,
+              onSelect: () => {
+                onClose();
+                window.setTimeout(() => onOpenCustomPdfModal(), 60);
+              },
+            },
+          ]
+        : []),
       {
         id: 'action-csv',
         group: 'Actions rapides',
@@ -455,6 +474,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
     onExportGoogleSheets,
     onExportJson,
     onExportPdf,
+    onOpenCustomPdfModal,
     onExportSeasonalCsv,
     onImportJson,
     onOpenExcelImport,

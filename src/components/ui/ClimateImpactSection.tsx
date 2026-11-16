@@ -30,6 +30,7 @@ import { formatAriary, formatKg, formatPercent } from '../../utils/formatters';
 import { FormField } from './FormField';
 import { SelectMenu } from './SelectMenu';
 import { Tooltip } from './Tooltip';
+import { ClimateLossCoefficientsPanel } from './ClimateLossCoefficientsPanel';
 
 const HAZARD_ICONS: Record<ClimateHazardType, React.ComponentType<{ className?: string }>> = {
   normal: CheckCircle2,
@@ -49,6 +50,7 @@ export const ClimateImpactSection: React.FC = () => {
 
   const hazardMeta = CLIMATE_HAZARD_META[climate.hazardType];
   const isShocked =
+    Boolean(climate.useCustomCoefficients && (climate.customCoefficients ?? []).some((c) => c.active)) ||
     climate.hazardType !== 'normal' ||
     Math.abs(climate.fieldYieldShockPercent) > 1e-6 ||
     Math.abs(climate.millingYieldDeltaPoints) > 1e-6;
@@ -128,6 +130,7 @@ export const ClimateImpactSection: React.FC = () => {
                   hazardType: 'normal',
                   fieldYieldShockPercent: 0,
                   millingYieldDeltaPoints: 0,
+                  useCustomCoefficients: false,
                 })
               }
               className="min-h-10 px-3 py-1.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950/50 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-xs font-semibold text-zinc-700 dark:text-zinc-200 inline-flex items-center gap-1.5 transition-colors"
@@ -341,6 +344,9 @@ export const ClimateImpactSection: React.FC = () => {
           </p>
         )}
       </div>
+
+      {/* Custom Climate Hazard Yield-Loss Coefficients (Cyclones, Drought, Floods) */}
+      <ClimateLossCoefficientsPanel />
 
       {/* Impact Summary + Mini Comparative Recharts BarChart */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-center pt-1">

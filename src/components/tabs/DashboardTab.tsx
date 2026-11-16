@@ -8,6 +8,7 @@ import { Tooltip, LabelWithTooltip } from '../ui/Tooltip';
 import { ScenarioSideBySideCard } from '../ui/ScenarioSideBySideCard';
 import { ProjectHealthDiagnosticCard } from '../ui/ProjectHealthDiagnosticCard';
 import { BagMarginSimulatorCard } from '../ui/BagMarginSimulatorCard';
+import { ProductLifecycleCard } from '../ui/ProductLifecycleCard';
 import { TreasuryManagementView } from '../ui/TreasuryManagementView';
 import { KpiContextMenu, KpiContextMenuState, KpiContextTarget } from '../ui/KpiContextMenu';
 import { KpiNotesModal } from '../ui/KpiNotesModal';
@@ -22,9 +23,11 @@ import { LiveStatusWidget } from '../ui/LiveStatusWidget';
 import { QuickMonteCarloDashboardCard } from '../ui/QuickMonteCarloDashboardCard';
 import { StrategicAdviceModal } from '../ui/StrategicAdviceModal';
 import { DashboardReportNotesSection } from '../ui/DashboardReportNotesSection';
+import { AiFinancialAnalysisCard } from '../ui/AiFinancialAnalysisCard';
 import { EmailAlertsModal } from '../ui/EmailAlertsModal';
 import { EmailServiceStatusWidget } from '../ui/EmailServiceStatusWidget';
 import { OperationalCostDonutCard } from '../charts/OperationalCostDonutCard';
+import { ScenarioVsBaselineChartCard } from '../charts/ScenarioVsBaselineChartCard';
 import {
   buildAlertEmailDraft,
   buildBreachSignature,
@@ -75,6 +78,7 @@ import { MAPPING_TARGET_OPTIONS } from '../../utils/excelImport';
 export const DashboardTab: React.FC<{
   onNavigate: (tabId: string) => void;
   onExportPdf?: () => void;
+  onOpenCustomPdfModal?: () => void;
   isExportingPdf?: boolean;
   onExportDocx?: () => void;
   isExportingDocx?: boolean;
@@ -83,6 +87,7 @@ export const DashboardTab: React.FC<{
 }> = ({
   onNavigate,
   onExportPdf,
+  onOpenCustomPdfModal,
   isExportingPdf = false,
   onExportDocx,
   isExportingDocx = false,
@@ -111,6 +116,8 @@ export const DashboardTab: React.FC<{
     resetToDefaults,
     emailAlertConfig,
     emailAlertHistory,
+    dashboardReportNotes,
+    setDashboardReportNotes,
     notify,
   } = useFinancial();
 
@@ -632,7 +639,7 @@ export const DashboardTab: React.FC<{
           {onExportPdf && (
             <button
               type="button"
-              onClick={onExportPdf}
+              onClick={() => onExportPdf()}
               disabled={isExportingPdf}
               title="Exporter l’intégralité du tableau de bord, graphiques Recharts et tableaux de synthèse en PDF"
               className="min-h-11 sm:min-h-10 px-3.5 py-2 rounded-xl border border-zinc-300 dark:border-white/[0.12] bg-white dark:bg-[#191828] hover:bg-zinc-100 dark:hover:bg-[#222038] text-xs font-semibold text-zinc-900 dark:text-zinc-100 transition-colors inline-flex items-center gap-1.5 whitespace-nowrap disabled:opacity-60 disabled:cursor-wait"
@@ -641,9 +648,22 @@ export const DashboardTab: React.FC<{
               <span>{isExportingPdf ? 'Export PDF…' : 'Exporter PDF'}</span>
             </button>
           )}
+          {onOpenCustomPdfModal && (
+            <button
+              type="button"
+              onClick={onOpenCustomPdfModal}
+              disabled={isExportingPdf}
+              title="Sélectionner les sections du rapport PDF (Tableau de bord, PESTEL, Sensibilité…)"
+              className="min-h-11 sm:min-h-10 px-3.5 py-2 rounded-xl border border-indigo-500/35 bg-indigo-500/10 hover:bg-indigo-500/20 text-xs font-semibold text-indigo-800 dark:text-indigo-200 transition-colors inline-flex items-center gap-1.5 whitespace-nowrap disabled:opacity-60"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" aria-hidden="true" />
+              <span>PDF personnalisé</span>
+            </button>
+          )}
           <ExportMenu
             onExportExcel={exportToExcel}
             onExportPdf={onExportPdf}
+            onOpenCustomPdfModal={onOpenCustomPdfModal}
             isExportingPdf={isExportingPdf}
             onExportDocx={onExportDocx}
             isExportingDocx={isExportingDocx}
@@ -880,7 +900,26 @@ export const DashboardTab: React.FC<{
             </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 text-xs">
+            <label className="space-y-1">
+              <span className="block font-medium text-zinc-700 dark:text-zinc-300">
+                Marge nette min (%)
+              </span>
+              <input
+                type="number"
+                step="1"
+                min="-50"
+                max="90"
+                value={Number(((resolvedKpiThresholds.minNetMarginRate ?? 0.08) * 100).toFixed(1))}
+                onChange={(e) =>
+                  updateKpiThresholds({
+                    minNetMarginRate: (Number(e.target.value) || 0) / 100,
+                  })
+                }
+                className="w-full px-2.5 py-1.5 rounded-lg border border-zinc-300 dark:border-white/[0.12] bg-zinc-50 dark:bg-[#171627] font-mono text-xs text-zinc-900 dark:text-white"
+              />
+            </label>
+
             <label className="space-y-1">
               <span className="block font-medium text-zinc-700 dark:text-zinc-300">
                 Marge opérationnelle min (%)
@@ -1049,11 +1088,11 @@ export const DashboardTab: React.FC<{
               />
               <div>
                 <div className="text-xs sm:text-sm font-bold">
-                  Alerte seuil KPI : {kpiAlerts.breachedItems.length} indicateur
-                  {kpiAlerts.breachedItems.length > 1 ? 's' : ''} hors cible
+                  Alerte seuil de rentabilité : {kpiAlerts.breachedItems.length} indicateur
+                  {kpiAlerts.breachedItems.length > 1 ? 's' : ''} sous cible
                 </div>
                 <p className="text-xs text-rose-900/90 dark:text-rose-200/90 mt-0.5">
-                  Les performances actuelles franchissent les seuils critiques configurés dans les hypothèses.
+                  Les performances actuelles franchissent les seuils préconfigurés (marge nette, TRI, VAN, marges ou payback).
                 </p>
               </div>
             </div>
@@ -1290,16 +1329,23 @@ export const DashboardTab: React.FC<{
             value={formatAriary(y1.netResultAfterTaxAr, { inMillions: inM })}
             animatedValue={y1.netResultAfterTaxAr}
             formatAnimated={(v) => formatAriary(v, { inMillions: inM })}
+            alertLabel={
+              kpiAlerts.items.netMargin.breached ? 'Marge nette sous seuil' : undefined
+            }
             sub={
               <>
                 Marge nette :{' '}
                 <AnimatedNumber value={y1.netMarginAfterTaxRate} format={(v) => formatPercent(v)} />{' '}
-                (IR {taxLabel})
+                · Seuil {kpiAlerts.items.netMargin.thresholdFormatted}
               </>
             }
-            icon={TrendingUp}
-            tone={y1.netResultAfterTaxAr >= 0 ? 'positive' : 'danger'}
-            tooltip={`Résultat net = (Marge brute − Charges fixes annuelles) × (1 − IR ${taxLabel}). Aucun IR prélevé en cas de résultat négatif.`}
+            icon={kpiAlerts.items.netMargin.breached ? AlertTriangle : TrendingUp}
+            tone={
+              kpiAlerts.items.netMargin.breached || y1.netResultAfterTaxAr < 0
+                ? 'danger'
+                : 'positive'
+            }
+            tooltip={`Résultat net = (Marge brute − Charges fixes annuelles) × (1 − IR ${taxLabel}). Seuil alerte marge nette : ${kpiAlerts.items.netMargin.thresholdFormatted}.`}
             sparklineData={
               kpiSparklineMode === 'scenarios'
                 ? scenarioTrends.series.netResult
@@ -2201,6 +2247,9 @@ export const DashboardTab: React.FC<{
         }}
       />
 
+      {/* Comparaison visuelle CA & Marge Nette (Scénario Actuel vs Référence) */}
+      <ScenarioVsBaselineChartCard />
+
       {/* Comparaison Côte à Côte de Deux Scénarios (Dashboard module) */}
       <ScenarioSideBySideCard onNavigate={onNavigate} />
 
@@ -2213,6 +2262,9 @@ export const DashboardTab: React.FC<{
 
       {/* Simulateur interactif de marge brute par sac de riz */}
       <BagMarginSimulatorCard />
+
+      {/* Analyse du cycle de vie du produit (Paddy -> Riz usiné) */}
+      <ProductLifecycleCard />
 
       {/* High Season vs Low Season Comparison */}
       <section
@@ -2519,6 +2571,15 @@ export const DashboardTab: React.FC<{
           </table>
         </div>
       </section>
+
+      {/* Outil d'IA générative : analyse qualitative & points de vigilance (VAN / TRI) */}
+      <AiFinancialAnalysisCard
+        onInsertIntoNotes={(paragraph) => {
+          const trimmed = dashboardReportNotes.trim();
+          setDashboardReportNotes(trimmed ? `${trimmed}\n\n${paragraph}` : paragraph);
+          notify('success', 'Analyse qualitative insérée dans les Notes du rapport.');
+        }}
+      />
 
       {/* Editable Report Notes (Automatically included in PDF export) */}
       <DashboardReportNotesSection

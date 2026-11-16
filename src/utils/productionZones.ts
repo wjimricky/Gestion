@@ -13,6 +13,7 @@ import {
 export type ProductionZoneId =
   | 'current'
   | 'alaotra'
+  | 'itasy'
   | 'marovoay'
   | 'vakinankaratra'
   | 'sofia';
@@ -72,6 +73,24 @@ export const MADAGASCAR_PRODUCTION_ZONES: ProductionZoneProfile[] = [
     volumeMultiplier: 1.12,
     fuelPriceMultiplier: 1.04,
     millingYieldOffset: 0.01,
+  },
+  {
+    id: 'itasy',
+    name: 'Itasy (Miarinarivo / Analavory)',
+    shortName: 'Itasy',
+    region: 'Itasy · Bassin lacustre RN1',
+    color: '#8b5cf6',
+    logisticsSummary: '115–135 km · RN1 goudronnée + pistes rizières · Proximité Tana',
+    avgFieldYieldKgPerHa: 3850,
+    fieldYieldNote: 'Plaines volcaniques & cuvette du Lac Itasy, accès rapide RN1 (3,85 t/ha)',
+    distanceKmHS: 115,
+    distanceKmBS: 135,
+    roadHS: 'goudronnee',
+    roadBS: 'piste_praticable',
+    paddyPriceMultiplier: 0.99,
+    volumeMultiplier: 1.01,
+    fuelPriceMultiplier: 1.0,
+    millingYieldOffset: 0.005,
   },
   {
     id: 'marovoay',
@@ -294,6 +313,12 @@ export interface ZoneSimulationResult {
   avgLogisticsCostPerRotAr: number;
   logisticsCostPerKgPaddyAr: number;
   annualTurnoverAr: number;
+  paddyCostPerKgHS: number;
+  paddyCostPerKgBS: number;
+  millingYieldPct: number;
+  unitCostPerKgRiceAr: number;
+  netResultAfterTaxAr: number;
+  year3ProjectionAr: number;
 }
 
 export function simulateZoneProfitability(
@@ -319,6 +344,10 @@ export function simulateZoneProfitability(
     const totalPaddy =
       baseModel.hauteSaison.totalPaddyKg + baseModel.basseSaison.totalPaddyKg;
 
+    const totalRiceKg = Math.max(1, baseModel.year1.totalRiceKgSold);
+    const totalAnnualOperatingAndFixed =
+      baseModel.year1.totalPurchaseAndOperatingCostsAr + baseModel.year1.annualFixedChargesAr;
+
     return {
       profile,
       model: baseModel,
@@ -331,6 +360,12 @@ export function simulateZoneProfitability(
       avgLogisticsCostPerRotAr: totalRot > 0 ? totalAnnualLogCost / totalRot : 0,
       logisticsCostPerKgPaddyAr: totalPaddy > 0 ? totalAnnualLogCost / totalPaddy : 0,
       annualTurnoverAr: baseModel.year1.totalTurnoverAr,
+      paddyCostPerKgHS: baseModel.hauteSaison.costPerKgPaddyAr,
+      paddyCostPerKgBS: baseModel.basseSaison.costPerKgPaddyAr,
+      millingYieldPct: totalPaddy > 0 ? (baseModel.year1.totalRiceKgSold / totalPaddy) * 100 : 70,
+      unitCostPerKgRiceAr: totalAnnualOperatingAndFixed / totalRiceKg,
+      netResultAfterTaxAr: baseModel.year1.netResultAfterTaxAr,
+      year3ProjectionAr: baseModel.projections.realistic[2]?.netResultAfterTaxAr ?? baseModel.year1.netResultAfterTaxAr,
     };
   }
 
@@ -408,6 +443,10 @@ export function simulateZoneProfitability(
     bsCost * zoneModel.basseSaison.totalRotations;
   const totalPaddy = zoneModel.hauteSaison.totalPaddyKg + zoneModel.basseSaison.totalPaddyKg;
 
+  const totalRiceKg = Math.max(1, zoneModel.year1.totalRiceKgSold);
+  const totalAnnualOperatingAndFixed =
+    zoneModel.year1.totalPurchaseAndOperatingCostsAr + zoneModel.year1.annualFixedChargesAr;
+
   return {
     profile,
     model: zoneModel,
@@ -420,6 +459,12 @@ export function simulateZoneProfitability(
     avgLogisticsCostPerRotAr: totalRot > 0 ? totalAnnualLogCost / totalRot : 0,
     logisticsCostPerKgPaddyAr: totalPaddy > 0 ? totalAnnualLogCost / totalPaddy : 0,
     annualTurnoverAr: zoneModel.year1.totalTurnoverAr,
+    paddyCostPerKgHS: zoneModel.hauteSaison.costPerKgPaddyAr,
+    paddyCostPerKgBS: zoneModel.basseSaison.costPerKgPaddyAr,
+    millingYieldPct: totalPaddy > 0 ? (zoneModel.year1.totalRiceKgSold / totalPaddy) * 100 : 70,
+    unitCostPerKgRiceAr: totalAnnualOperatingAndFixed / totalRiceKg,
+    netResultAfterTaxAr: zoneModel.year1.netResultAfterTaxAr,
+    year3ProjectionAr: zoneModel.projections.realistic[2]?.netResultAfterTaxAr ?? zoneModel.year1.netResultAfterTaxAr,
   };
 }
 
@@ -431,6 +476,7 @@ export interface ZoneRadarDatum {
   // Flat keys for Recharts dataKey binding
   current?: number;
   alaotra?: number;
+  itasy?: number;
   marovoay?: number;
   vakinankaratra?: number;
   sofia?: number;

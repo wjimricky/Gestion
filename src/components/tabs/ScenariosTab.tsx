@@ -8,7 +8,7 @@ import { MultiScenarioDcfComparison } from '../ui/MultiScenarioDcfComparison';
 import { ScenarioNetCashFlowOverlayChart } from '../charts/ScenarioNetCashFlowOverlayChart';
 import { ScenarioDiscussionMode } from '../ui/ScenarioDiscussionMode';
 import { ViewToggle } from '../ui/ViewToggle';
-import { CheckCircle2, AlertTriangle, XCircle, GitCompare, FolderCog, Mic } from 'lucide-react';
+import { CheckCircle2, AlertTriangle, XCircle, GitCompare, FolderCog, Mic, Download } from 'lucide-react';
 
 interface ScenariosTabProps {
   onOpenScenarioManager?: () => void;
@@ -22,6 +22,7 @@ export const ScenariosTab: React.FC<ScenariosTabProps> = ({ onOpenScenarioManage
     activeScenarioId,
     unitDisplay,
     scenarioVoiceNotes,
+    exportFiveYearProjectionsToCsv,
   } = useFinancial();
   const inM = unitDisplay === 'millions';
   const [mobileView, setMobileView] = useState<'cards' | 'table'>('cards');
@@ -150,6 +151,16 @@ export const ScenariosTab: React.FC<ScenariosTabProps> = ({ onOpenScenarioManage
             <span>
               Mode Discussion ({scenarioVoiceNotes.filter((n) => !n.resolved).length})
             </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={exportFiveYearProjectionsToCsv}
+            title="Exporter les projections financières quinquennales (A1–A5 et 60 mois) en CSV"
+            className="min-h-12 sm:min-h-10 px-4 py-2 rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-xs sm:text-sm font-semibold text-zinc-800 dark:text-zinc-200 inline-flex items-center justify-center gap-2 shrink-0 transition-colors whitespace-nowrap no-print"
+          >
+            <Download className="w-4 h-4 text-teal-600 dark:text-teal-400 shrink-0" aria-hidden="true" />
+            <span>Exporter CSV (5 ans)</span>
           </button>
 
           {onOpenScenarioManager && (

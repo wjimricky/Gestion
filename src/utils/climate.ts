@@ -1,6 +1,8 @@
 import {
+  ClimateCoefficientCategory,
   ClimateHazardType,
   ClimateImpactAssumptions,
+  ClimateLossCoefficient,
   FinancialAssumptions,
 } from '../types/finance';
 import { computeSeason, computeYear1 } from '../engine/calculator';
@@ -62,6 +64,203 @@ export const CLIMATE_HAZARD_META: Record<ClimateHazardType, ClimateHazardMeta> =
   },
 };
 
+export const CLIMATE_CATEGORY_META: Record<
+  ClimateCoefficientCategory,
+  { label: string; badgeClass: string }
+> = {
+  cyclone: {
+    label: 'Cyclone',
+    badgeClass: 'border-rose-500/40 bg-rose-500/10 text-rose-800 dark:text-rose-200',
+  },
+  secheresse: {
+    label: 'Sécheresse',
+    badgeClass: 'border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200',
+  },
+  inondation: {
+    label: 'Inondation / Crue',
+    badgeClass: 'border-sky-500/40 bg-sky-500/10 text-sky-800 dark:text-sky-200',
+  },
+  autre: {
+    label: 'Autre aléa',
+    badgeClass: 'border-zinc-400/40 bg-zinc-500/10 text-zinc-800 dark:text-zinc-200',
+  },
+};
+
+export const DEFAULT_CLIMATE_COEFFICIENTS: ClimateLossCoefficient[] = [
+  {
+    id: 'coeff-cyclone-est',
+    label: 'Cyclone tropical (Côte Est / Alaotra)',
+    category: 'cyclone',
+    seasonScope: 'hauteSaison',
+    fieldLossPercent: 0.30,
+    millingLossPoints: 0.03,
+    probabilityPercent: 35,
+    active: false,
+  },
+  {
+    id: 'coeff-secheresse-elnino',
+    label: 'Sécheresse / Retard des pluies (El Niño)',
+    category: 'secheresse',
+    seasonScope: 'basseSaison',
+    fieldLossPercent: 0.22,
+    millingLossPoints: 0.02,
+    probabilityPercent: 45,
+    active: false,
+  },
+  {
+    id: 'coeff-crue-plaine',
+    label: 'Inondation / Crue basse plaine',
+    category: 'inondation',
+    seasonScope: 'both',
+    fieldLossPercent: 0.16,
+    millingLossPoints: 0.015,
+    probabilityPercent: 25,
+    active: false,
+  },
+];
+
+export const CLIMATE_COEFFICIENT_PRESETS: Array<Omit<ClimateLossCoefficient, 'id' | 'active'>> = [
+  {
+    label: 'Cyclone majeur (Batsirai / Freddy)',
+    category: 'cyclone',
+    seasonScope: 'hauteSaison',
+    fieldLossPercent: 0.38,
+    millingLossPoints: 0.04,
+    probabilityPercent: 30,
+  },
+  {
+    label: 'Sécheresse Grand Sud / Hautes Terres',
+    category: 'secheresse',
+    seasonScope: 'basseSaison',
+    fieldLossPercent: 0.28,
+    millingLossPoints: 0.025,
+    probabilityPercent: 40,
+  },
+  {
+    label: 'Engorgement / Crue de contre-saison',
+    category: 'inondation',
+    seasonScope: 'both',
+    fieldLossPercent: 0.18,
+    millingLossPoints: 0.02,
+    probabilityPercent: 35,
+  },
+];
+
+export interface AggregatedClimateCoefficientsResult {
+  activeCount: number;
+  hsFieldShockPercent: number; // negative ratio e.g. -0.22
+  bsFieldShockPercent: number;
+  hsMillingDeltaPoints: number; // negative pts e.g. -0.02
+  bsMillingDeltaPoints: number;
+  weightedFieldShockPercent: number;
+  weightedMillingDeltaPoints: number;
+}
+
+export function aggregateCustomClimateCoefficients(
+  climate: ClimateImpactAssumptions,
+  monthsHS = 5,
+  monthsBS = 7
+): AggregatedClimateCoefficientsResult {
+  const list = climate.customCoefficients ?? DEFAULT_CLIMATE_COEFFICIENTS;
+  const activeItems = list.filter((c) => c.active);
+  const mode = climate.coefficientAggregationMode ?? 'expected_probability';
+
+  const calcSeason = (season: 'hauteSaison' | 'basseSaison') => {
+    let survival = 1;
+    let millingLoss = 0;
+
+    for (const item of activeItems) {
+      if (item.seasonScope !== 'both' && item.seasonScope !== season) continue;
+      const probWeight =
+        mode === 'expected_probability'
+          ? Math.max(0, Math.min(1, (Number(item.probabilityPercent) || 0) / 100))
+          : 1;
+      const effFieldLoss = Math.max(
+        0,
+        Math.min(0.9, (Number(item.fieldLossPercent) || 0) * probWeight)
+      );
+      const effMillingLoss = Math.max(
+        0,
+        Math.min(0.45, (Number(item.millingLossPoints) || 0) * probWeight)
+      );
+      survival *= 1 - effFieldLoss;
+      millingLoss += effMillingLoss;
+    }
+
+    const fieldShockPercent = Math.max(-0.9, Math.min(0, survival - 1));
+    const millingDeltaPoints = -Math.min(0.45, millingLoss);
+    return { fieldShockPercent, millingDeltaPoints };
+  };
+
+  const hs = calcSeason('hauteSaison');
+  const bs = calcSeason('basseSaison');
+  const totalM = Math.max(1, monthsHS + monthsBS);
+  const weightedFieldShockPercent =
+    (hs.fieldShockPercent * monthsHS + bs.fieldShockPercent * monthsBS) / totalM;
+  const weightedMillingDeltaPoints =
+    (hs.millingDeltaPoints * monthsHS + bs.millingDeltaPoints * monthsBS) / totalM;
+
+  return {
+    activeCount: activeItems.length,
+    hsFieldShockPercent: hs.fieldShockPercent,
+    bsFieldShockPercent: bs.fieldShockPercent,
+    hsMillingDeltaPoints: hs.millingDeltaPoints,
+    bsMillingDeltaPoints: bs.millingDeltaPoints,
+    weightedFieldShockPercent,
+    weightedMillingDeltaPoints,
+  };
+}
+
+export function getResolvedClimateShocks(
+  climate: ClimateImpactAssumptions,
+  monthsHS = 5,
+  monthsBS = 7
+): {
+  hsFieldShockPercent: number;
+  bsFieldShockPercent: number;
+  hsMillingDeltaPoints: number;
+  bsMillingDeltaPoints: number;
+  effectiveAverageFieldShockPercent: number;
+  effectiveAverageMillingDeltaPoints: number;
+} {
+  if (!climate.enabled) {
+    return {
+      hsFieldShockPercent: 0,
+      bsFieldShockPercent: 0,
+      hsMillingDeltaPoints: 0,
+      bsMillingDeltaPoints: 0,
+      effectiveAverageFieldShockPercent: 0,
+      effectiveAverageMillingDeltaPoints: 0,
+    };
+  }
+
+  if (climate.useCustomCoefficients) {
+    const agg = aggregateCustomClimateCoefficients(climate, monthsHS, monthsBS);
+    return {
+      hsFieldShockPercent: agg.hsFieldShockPercent,
+      bsFieldShockPercent: agg.bsFieldShockPercent,
+      hsMillingDeltaPoints: agg.hsMillingDeltaPoints,
+      bsMillingDeltaPoints: agg.bsMillingDeltaPoints,
+      effectiveAverageFieldShockPercent: agg.weightedFieldShockPercent,
+      effectiveAverageMillingDeltaPoints: agg.weightedMillingDeltaPoints,
+    };
+  }
+
+  const applyHS =
+    climate.affectedSeason === 'both' || climate.affectedSeason === 'hauteSaison';
+  const applyBS =
+    climate.affectedSeason === 'both' || climate.affectedSeason === 'basseSaison';
+
+  return {
+    hsFieldShockPercent: applyHS ? climate.fieldYieldShockPercent : 0,
+    bsFieldShockPercent: applyBS ? climate.fieldYieldShockPercent : 0,
+    hsMillingDeltaPoints: applyHS ? climate.millingYieldDeltaPoints : 0,
+    bsMillingDeltaPoints: applyBS ? climate.millingYieldDeltaPoints : 0,
+    effectiveAverageFieldShockPercent: climate.fieldYieldShockPercent,
+    effectiveAverageMillingDeltaPoints: climate.millingYieldDeltaPoints,
+  };
+}
+
 export function getResolvedClimateImpact(
   assumptions: FinancialAssumptions
 ): ClimateImpactAssumptions {
@@ -82,6 +281,10 @@ export function getResolvedClimateImpact(
       existing?.baselineMillingYieldHS ?? assumptions.hauteSaison.yieldPaddyToRice,
     baselineMillingYieldBS:
       existing?.baselineMillingYieldBS ?? assumptions.basseSaison.yieldPaddyToRice,
+    useCustomCoefficients: existing?.useCustomCoefficients ?? false,
+    coefficientAggregationMode:
+      existing?.coefficientAggregationMode ?? 'expected_probability',
+    customCoefficients: existing?.customCoefficients ?? DEFAULT_CLIMATE_COEFFICIENTS,
   };
 }
 
@@ -89,31 +292,32 @@ export function applyClimateToSeasonValues(
   assumptions: FinancialAssumptions,
   climate: ClimateImpactAssumptions
 ): Pick<FinancialAssumptions, 'hauteSaison' | 'basseSaison'> {
-  const shockFactor = climate.enabled
-    ? Math.max(0.05, 1 + climate.fieldYieldShockPercent)
-    : 1;
-  const millingDelta = climate.enabled ? climate.millingYieldDeltaPoints : 0;
+  const shocks = getResolvedClimateShocks(
+    climate,
+    assumptions.hauteSaison.months,
+    assumptions.basseSaison.months
+  );
 
-  const applyHS =
-    climate.enabled && (climate.affectedSeason === 'both' || climate.affectedSeason === 'hauteSaison');
-  const applyBS =
-    climate.enabled && (climate.affectedSeason === 'both' || climate.affectedSeason === 'basseSaison');
+  const hsFactor = Math.max(0.05, 1 + shocks.hsFieldShockPercent);
+  const bsFactor = Math.max(0.05, 1 + shocks.bsFieldShockPercent);
 
-  const hsPaddy = applyHS
-    ? Math.max(100, Math.round(climate.baselinePaddyKgHS * shockFactor))
-    : Math.max(100, Math.round(climate.baselinePaddyKgHS));
+  const hsPaddy = Math.max(100, Math.round(climate.baselinePaddyKgHS * hsFactor));
+  const bsPaddy = Math.max(100, Math.round(climate.baselinePaddyKgBS * bsFactor));
 
-  const bsPaddy = applyBS
-    ? Math.max(100, Math.round(climate.baselinePaddyKgBS * shockFactor))
-    : Math.max(100, Math.round(climate.baselinePaddyKgBS));
-
-  const hsYield = applyHS
-    ? Math.max(0.2, Math.min(0.95, Number((climate.baselineMillingYieldHS + millingDelta).toFixed(4))))
-    : climate.baselineMillingYieldHS;
-
-  const bsYield = applyBS
-    ? Math.max(0.2, Math.min(0.95, Number((climate.baselineMillingYieldBS + millingDelta).toFixed(4))))
-    : climate.baselineMillingYieldBS;
+  const hsYield = Math.max(
+    0.2,
+    Math.min(
+      0.95,
+      Number((climate.baselineMillingYieldHS + shocks.hsMillingDeltaPoints).toFixed(4))
+    )
+  );
+  const bsYield = Math.max(
+    0.2,
+    Math.min(
+      0.95,
+      Number((climate.baselineMillingYieldBS + shocks.bsMillingDeltaPoints).toFixed(4))
+    )
+  );
 
   return {
     hauteSaison: {
@@ -146,14 +350,23 @@ export interface ClimateSimulationPreview {
   shockedPaddyRotHS: number;
   baselinePaddyRotBS: number;
   shockedPaddyRotBS: number;
+  effectiveFieldShockPercent: number;
+  effectiveMillingDeltaPoints: number;
 }
 
 export function computeClimateSimulationPreview(
   assumptions: FinancialAssumptions,
   climate: ClimateImpactAssumptions
 ): ClimateSimulationPreview {
+  const simulatedClimate: ClimateImpactAssumptions = { ...climate, enabled: true };
+  const shocks = getResolvedClimateShocks(
+    simulatedClimate,
+    assumptions.hauteSaison.months,
+    assumptions.basseSaison.months
+  );
+
   const nominalYieldKgPerHa = Math.max(0, climate.nominalYieldKgPerHa);
-  const shockRatio = climate.fieldYieldShockPercent;
+  const shockRatio = shocks.effectiveAverageFieldShockPercent;
   const effectiveYieldKgPerHa = Math.max(0, nominalYieldKgPerHa * (1 + shockRatio));
   const yieldLossKgPerHa = effectiveYieldKgPerHa - nominalYieldKgPerHa;
 
@@ -177,7 +390,6 @@ export function computeClimateSimulationPreview(
   };
 
   // Shocked assumptions (always simulate the shock preview even if sync toggle is paused)
-  const simulatedClimate: ClimateImpactAssumptions = { ...climate, enabled: true };
   const shockedSeasons = applyClimateToSeasonValues(baselineAssumptions, simulatedClimate);
   const shockedAssumptions: FinancialAssumptions = {
     ...baselineAssumptions,
@@ -223,5 +435,7 @@ export function computeClimateSimulationPreview(
     shockedPaddyRotHS: shockedSeasons.hauteSaison.paddyBoughtKgPerRotation,
     baselinePaddyRotBS: climate.baselinePaddyKgBS,
     shockedPaddyRotBS: shockedSeasons.basseSaison.paddyBoughtKgPerRotation,
+    effectiveFieldShockPercent: shocks.effectiveAverageFieldShockPercent,
+    effectiveMillingDeltaPoints: shocks.effectiveAverageMillingDeltaPoints,
   };
 }

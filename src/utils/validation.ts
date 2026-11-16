@@ -177,6 +177,46 @@ export function validateAssumptions(a: FinancialAssumptions): ValidationResult {
     if (!Number.isFinite(a.logistics.truckTollAndWearArPerKm) || a.logistics.truckTollAndWearArPerKm < 0) {
       errors['logistics.truckTollAndWearArPerKm'] = 'Les frais d’usure/km doivent être ≥ 0 Ar/km.';
     }
+    if (
+      a.logistics.distanceToUrbanMarketKmHS !== undefined &&
+      (!Number.isFinite(a.logistics.distanceToUrbanMarketKmHS) || a.logistics.distanceToUrbanMarketKmHS < 0)
+    ) {
+      errors['logistics.distanceToUrbanMarketKmHS'] = 'La distance marché urbain HS doit être ≥ 0 km.';
+    }
+    if (
+      a.logistics.distanceToUrbanMarketKmBS !== undefined &&
+      (!Number.isFinite(a.logistics.distanceToUrbanMarketKmBS) || a.logistics.distanceToUrbanMarketKmBS < 0)
+    ) {
+      errors['logistics.distanceToUrbanMarketKmBS'] = 'La distance marché urbain BS doit être ≥ 0 km.';
+    }
+    if (
+      a.logistics.urbanFreightArPerTonKm !== undefined &&
+      (!Number.isFinite(a.logistics.urbanFreightArPerTonKm) || a.logistics.urbanFreightArPerTonKm < 0)
+    ) {
+      errors['logistics.urbanFreightArPerTonKm'] = 'Le tarif fret urbain doit être ≥ 0 Ar/t·km.';
+    }
+  }
+
+  // Stock Management & BFR validation (if present)
+  if (a.stockManagement) {
+    if (!Number.isFinite(a.stockManagement.paddyHoldingDaysHS) || a.stockManagement.paddyHoldingDaysHS < 0) {
+      errors['stockManagement.paddyHoldingDaysHS'] = 'La durée de conservation paddy HS doit être ≥ 0 j.';
+    }
+    if (!Number.isFinite(a.stockManagement.paddyHoldingDaysBS) || a.stockManagement.paddyHoldingDaysBS < 0) {
+      errors['stockManagement.paddyHoldingDaysBS'] = 'La durée de conservation paddy BS doit être ≥ 0 j.';
+    }
+    if (
+      !Number.isFinite(a.stockManagement.paddyStorageCostArPerTonMonth) ||
+      a.stockManagement.paddyStorageCostArPerTonMonth < 0
+    ) {
+      errors['stockManagement.paddyStorageCostArPerTonMonth'] = 'Le coût de stockage paddy doit être ≥ 0.';
+    }
+    if (
+      !Number.isFinite(a.stockManagement.milledRiceStorageCostArPerTonMonth) ||
+      a.stockManagement.milledRiceStorageCostArPerTonMonth < 0
+    ) {
+      errors['stockManagement.milledRiceStorageCostArPerTonMonth'] = 'Le coût de stockage riz usiné doit être ≥ 0.';
+    }
   }
 
   // KPI Alert thresholds validation (if present)
@@ -189,6 +229,15 @@ export function validateAssumptions(a: FinancialAssumptions): ValidationResult {
     }
     if (!Number.isFinite(a.kpiThresholds.maxPaybackMonths) || a.kpiThresholds.maxPaybackMonths <= 0) {
       errors['kpiThresholds.maxPaybackMonths'] = 'Le délai de récupération maximal doit être > 0 mois.';
+    }
+    if (
+      a.kpiThresholds.minNetMarginRate !== undefined &&
+      (!Number.isFinite(a.kpiThresholds.minNetMarginRate) ||
+        a.kpiThresholds.minNetMarginRate < -1 ||
+        a.kpiThresholds.minNetMarginRate > 1)
+    ) {
+      errors['kpiThresholds.minNetMarginRate'] =
+        'Le seuil de marge nette doit être entre -100 % et 100 %.';
     }
     if (
       a.kpiThresholds.minOperatingMarginRate !== undefined &&
@@ -383,6 +432,45 @@ export function validateAssumptions(a: FinancialAssumptions): ValidationResult {
     ) {
       errors['maintenance.operatingDaysPerMonth'] =
         'Les jours ouvrés par mois doivent être entre 15 et 31 jours.';
+    }
+  }
+
+  // Communal taxes & land royalties validation (if present)
+  if (a.communalTaxes) {
+    if (
+      !Number.isFinite(a.communalTaxes.ristourneArPerKgPaddy) ||
+      a.communalTaxes.ristourneArPerKgPaddy < 0
+    ) {
+      errors['communalTaxes.ristourneArPerKgPaddy'] =
+        'La ristourne communale par kg doit être ≥ 0 Ar/kg.';
+    }
+    if (
+      !Number.isFinite(a.communalTaxes.marketFeePerRotationAr) ||
+      a.communalTaxes.marketFeePerRotationAr < 0
+    ) {
+      errors['communalTaxes.marketFeePerRotationAr'] =
+        'Les droits de marché par rotation doivent être ≥ 0 Ar.';
+    }
+    if (
+      !Number.isFinite(a.communalTaxes.cultivatedLandHa) ||
+      a.communalTaxes.cultivatedLandHa < 0
+    ) {
+      errors['communalTaxes.cultivatedLandHa'] =
+        'La surface foncière déclarée doit être ≥ 0 ha.';
+    }
+    if (
+      !Number.isFinite(a.communalTaxes.landRoyaltyArPerHaYear) ||
+      a.communalTaxes.landRoyaltyArPerHaYear < 0
+    ) {
+      errors['communalTaxes.landRoyaltyArPerHaYear'] =
+        'La redevance foncière par hectare doit être ≥ 0 Ar/ha/an.';
+    }
+    if (
+      !Number.isFinite(a.communalTaxes.ifpbAndPatentMonthlyAr) ||
+      a.communalTaxes.ifpbAndPatentMonthlyAr < 0
+    ) {
+      errors['communalTaxes.ifpbAndPatentMonthlyAr'] =
+        'La patente et IFPB mensuels doivent être ≥ 0 Ar/mois.';
     }
   }
 

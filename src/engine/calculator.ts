@@ -15,6 +15,7 @@ import {
   FullFinancialModel,
   SensitivityMatrix,
 } from '../types/finance';
+import { computeFixedAssetsAnalysis } from '../utils/fixedAssets';
 
 /**
  * Computes the operational and financial results of a single season (Haute or Basse Saison).
@@ -135,7 +136,8 @@ export function computeYear1(
   hs: SeasonResult,
   bs: SeasonResult,
   corporateTaxRate: number,
-  investorShare: number
+  investorShare: number,
+  annualDepreciationAr = 0
 ): Year1Result {
   const totalRiceKgSold = hs.totalRiceKg + bs.totalRiceKg;
   const totalTurnoverAr = hs.totalTurnoverAr + bs.totalTurnoverAr;
@@ -150,13 +152,18 @@ export function computeYear1(
   const totalMonths = hs.months + bs.months;
   const monthlyFixedChargesAr = totalMonths > 0 ? annualFixedChargesAr / totalMonths : 0;
 
-  const netResultBeforeTaxAr = annualGrossProfitAr - annualFixedChargesAr;
+  const safeDepreciationAr = Math.max(0, annualDepreciationAr);
+  const ebitdaBeforeDepreciationAr = annualGrossProfitAr - annualFixedChargesAr;
+  const netResultBeforeTaxAr = ebitdaBeforeDepreciationAr - safeDepreciationAr;
   const netMarginBeforeTaxRate =
     totalTurnoverAr > 0 ? netResultBeforeTaxAr / totalTurnoverAr : 0;
 
-  // Corporate Tax (IR) is applied on positive net profit
+  // Corporate Tax (IR) is applied on positive taxable profit (after deductible depreciation)
+  const taxBeforeDepreciation = Math.max(0, ebitdaBeforeDepreciationAr) * corporateTaxRate;
   const corporateTaxAr = Math.max(0, netResultBeforeTaxAr) * corporateTaxRate;
+  const depreciationTaxShieldAr = Math.max(0, taxBeforeDepreciation - corporateTaxAr);
   const netResultAfterTaxAr = netResultBeforeTaxAr - corporateTaxAr;
+  const operatingCashFlowAfterTaxAr = netResultAfterTaxAr + safeDepreciationAr;
 
   const netMarginAfterTaxRate =
     totalTurnoverAr > 0 ? netResultAfterTaxAr / totalTurnoverAr : 0;
@@ -180,6 +187,9 @@ export function computeYear1(
     netMarginAfterTaxRate,
     investorShareAr,
     companyShareAr,
+    annualDepreciationAr: safeDepreciationAr,
+    depreciationTaxShieldAr,
+    operatingCashFlowAfterTaxAr,
   };
 }
 
@@ -1008,11 +1018,17 @@ export function calculateFullModel(
   const hauteSaison = computeSeason(assumptions, 'hauteSaison');
   const basseSaison = computeSeason(assumptions, 'basseSaison');
 
+  const annualDepreciationAr =
+    assumptions.fixedAssets?.enabled && assumptions.fixedAssets?.applyToModel
+      ? computeFixedAssetsAnalysis(assumptions).year1DepreciationAr
+      : 0;
+
   const year1 = computeYear1(
     hauteSaison,
     basseSaison,
     assumptions.corporateTaxRate,
-    assumptions.investorShare
+    assumptions.investorShare,
+    annualDepreciationAr
   );
 
   const investment = computeInvestment(hauteSaison, assumptions, year1);

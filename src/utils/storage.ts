@@ -5,7 +5,7 @@ import {
   StorageOptimizationAssumptions,
 } from '../types/finance';
 import { calculateFullModel } from '../engine/calculator';
-import { getResolvedClimateImpact } from './climate';
+import { getResolvedClimateImpact, getResolvedClimateShocks } from './climate';
 
 export interface StorageMethodMeta {
   label: string;
@@ -161,25 +161,17 @@ export function applyClimateAndStorageToSeasons(
   const climate = climateInput ?? getResolvedClimateImpact(assumptions);
   const storage = storageInput ?? getResolvedStorageOptimization(assumptions);
 
-  const shockFactor = climate.enabled
-    ? Math.max(0.05, 1 + climate.fieldYieldShockPercent)
-    : 1;
-  const millingDelta = climate.enabled ? climate.millingYieldDeltaPoints : 0;
+  const shocks = getResolvedClimateShocks(
+    climate,
+    assumptions.hauteSaison.months,
+    assumptions.basseSaison.months
+  );
 
-  const climateHS =
-    climate.enabled &&
-    (climate.affectedSeason === 'both' || climate.affectedSeason === 'hauteSaison');
-  const climateBS =
-    climate.enabled &&
-    (climate.affectedSeason === 'both' || climate.affectedSeason === 'basseSaison');
+  const hsFactor = Math.max(0.05, 1 + shocks.hsFieldShockPercent);
+  const bsFactor = Math.max(0.05, 1 + shocks.bsFieldShockPercent);
 
-  const hsPaddy = climateHS
-    ? Math.max(100, Math.round(climate.baselinePaddyKgHS * shockFactor))
-    : Math.max(100, Math.round(climate.baselinePaddyKgHS));
-
-  const bsPaddy = climateBS
-    ? Math.max(100, Math.round(climate.baselinePaddyKgBS * shockFactor))
-    : Math.max(100, Math.round(climate.baselinePaddyKgBS));
+  const hsPaddy = Math.max(100, Math.round(climate.baselinePaddyKgHS * hsFactor));
+  const bsPaddy = Math.max(100, Math.round(climate.baselinePaddyKgBS * bsFactor));
 
   const avgRotPerMonth =
     (assumptions.hauteSaison.rotationsPerMonth +
@@ -208,12 +200,8 @@ export function applyClimateAndStorageToSeasons(
     storage.enabled &&
     (storage.affectedSeason === 'both' || storage.affectedSeason === 'basseSaison');
 
-  const baseYieldHS = climateHS
-    ? climate.baselineMillingYieldHS + millingDelta
-    : climate.baselineMillingYieldHS;
-  const baseYieldBS = climateBS
-    ? climate.baselineMillingYieldBS + millingDelta
-    : climate.baselineMillingYieldBS;
+  const baseYieldHS = climate.baselineMillingYieldHS + shocks.hsMillingDeltaPoints;
+  const baseYieldBS = climate.baselineMillingYieldBS + shocks.bsMillingDeltaPoints;
 
   const hsYield = Math.max(
     0.15,

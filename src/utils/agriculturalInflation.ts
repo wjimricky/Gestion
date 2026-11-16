@@ -6,11 +6,27 @@ export type InflationMacroPreset =
   | 'tension_carburant'
   | 'custom';
 
+export type InflationSimulationMode = 'constant' | 'variable';
+
+export interface AnnualVariableInflationRate {
+  year: number; // 1..5
+  paddyRatePct: number; // % annual variation for year t
+  inputsRatePct: number; // % annual variation for inputs, bags, diesel, milling
+  fixedRatePct: number; // % annual variation for fixed charges
+}
+
+export type VariableInflationCurvePreset =
+  | 'pic_climatique_a2'
+  | 'choc_carburant_a2_a3'
+  | 'desinflation_progressive';
+
 export interface AgriculturalInflationParams {
   preset: InflationMacroPreset;
-  paddyInflationRatePct: number; // %/an — hausse prix du paddy producteur
-  inputsAndFuelInflationRatePct: number; // %/an — hausse gasoil, sacs PP, décorticage, docker
-  fixedChargesInflationRatePct: number; // %/an — hausse salaires, loyers, entretien
+  inflationMode: InflationSimulationMode;
+  paddyInflationRatePct: number; // %/an — hausse prix du paddy producteur (mode constant)
+  inputsAndFuelInflationRatePct: number; // %/an — hausse gasoil, sacs PP, décorticage, docker (mode constant)
+  fixedChargesInflationRatePct: number; // %/an — hausse salaires, loyers, entretien (mode constant)
+  annualVariableRates: AnnualVariableInflationRate[]; // taux variables année par année A1..A5
   generalCpiDeflatorPct: number; // %/an — inflation générale IPC Madagascar pour calcul en Ar constants
   sellingPricePassThroughPct: number; // 0..100 % de répercussion de l'inflation des coûts sur le prix du riz
   volumeGrowthPctPerYear: number; // %/an croissance physique des volumes (0 % pour isoler l'inflation pure)
@@ -21,8 +37,65 @@ export interface InflationPresetMeta {
   label: string;
   shortLabel: string;
   description: string;
-  params: Omit<AgriculturalInflationParams, 'preset'>;
+  params: Omit<AgriculturalInflationParams, 'preset' | 'inflationMode' | 'annualVariableRates'>;
 }
+
+export function buildUniformVariableRates(
+  paddyPct: number,
+  inputsPct: number,
+  fixedPct: number
+): AnnualVariableInflationRate[] {
+  return [1, 2, 3, 4, 5].map((year) => ({
+    year,
+    paddyRatePct: year === 1 ? 0 : paddyPct,
+    inputsRatePct: year === 1 ? 0 : inputsPct,
+    fixedRatePct: year === 1 ? 0 : fixedPct,
+  }));
+}
+
+export const VARIABLE_INFLATION_CURVE_PRESETS: Array<{
+  id: VariableInflationCurvePreset;
+  label: string;
+  description: string;
+  rates: AnnualVariableInflationRate[];
+}> = [
+  {
+    id: 'pic_climatique_a2',
+    label: 'Pic climatique A2 (+18 % paddy)',
+    description: 'Tension ponctuelle sur le paddy en A2 (+18 %) puis normalisation en A4–A5.',
+    rates: [
+      { year: 1, paddyRatePct: 0, inputsRatePct: 0, fixedRatePct: 0 },
+      { year: 2, paddyRatePct: 18, inputsRatePct: 12, fixedRatePct: 7 },
+      { year: 3, paddyRatePct: 9, inputsRatePct: 10, fixedRatePct: 6.5 },
+      { year: 4, paddyRatePct: 6, inputsRatePct: 7, fixedRatePct: 6 },
+      { year: 5, paddyRatePct: 5, inputsRatePct: 6, fixedRatePct: 5.5 },
+    ],
+  },
+  {
+    id: 'choc_carburant_a2_a3',
+    label: 'Choc carburant A2–A3 (+16 %)',
+    description: 'Flambée persistante des intrants & gasoil sur A2–A3 avant stabilisation.',
+    rates: [
+      { year: 1, paddyRatePct: 0, inputsRatePct: 0, fixedRatePct: 0 },
+      { year: 2, paddyRatePct: 10, inputsRatePct: 16, fixedRatePct: 8 },
+      { year: 3, paddyRatePct: 12, inputsRatePct: 15, fixedRatePct: 8.5 },
+      { year: 4, paddyRatePct: 7.5, inputsRatePct: 8, fixedRatePct: 6.5 },
+      { year: 5, paddyRatePct: 6, inputsRatePct: 6.5, fixedRatePct: 5.5 },
+    ],
+  },
+  {
+    id: 'desinflation_progressive',
+    label: 'Désinflation A1 → A5',
+    description: 'Pression initiale élevée (A1–A2) suivie d’une décélération progressive jusqu’en A5.',
+    rates: [
+      { year: 1, paddyRatePct: 4, inputsRatePct: 5, fixedRatePct: 3 },
+      { year: 2, paddyRatePct: 11, inputsRatePct: 12, fixedRatePct: 7.5 },
+      { year: 3, paddyRatePct: 8, inputsRatePct: 8.5, fixedRatePct: 6 },
+      { year: 4, paddyRatePct: 5.5, inputsRatePct: 6, fixedRatePct: 5 },
+      { year: 5, paddyRatePct: 4, inputsRatePct: 4.5, fixedRatePct: 4 },
+    ],
+  },
+];
 
 export const AGRICULTURAL_INFLATION_PRESETS: InflationPresetMeta[] = [
   {
@@ -73,12 +146,22 @@ export const AGRICULTURAL_INFLATION_PRESETS: InflationPresetMeta[] = [
 
 export const DEFAULT_AGRICULTURAL_INFLATION_PARAMS: AgriculturalInflationParams = {
   preset: 'tendancielle_mg',
+  inflationMode: 'constant',
   ...AGRICULTURAL_INFLATION_PRESETS[1].params,
+  annualVariableRates: buildUniformVariableRates(
+    AGRICULTURAL_INFLATION_PRESETS[1].params.paddyInflationRatePct,
+    AGRICULTURAL_INFLATION_PRESETS[1].params.inputsAndFuelInflationRatePct,
+    AGRICULTURAL_INFLATION_PRESETS[1].params.fixedChargesInflationRatePct
+  ),
 };
 
 export interface InflationProjectionYearRow {
   year: number; // 1..5
   label: string; // A1..A5
+  appliedPaddyInflationPct: number;
+  appliedInputsInflationPct: number;
+  appliedFixedInflationPct: number;
+  appliedTotalCostInflationPct: number;
   paddyPriceHsArPerKg: number;
   paddyPriceBsArPerKg: number;
   riceSellingPriceHsArPerKg: number;
@@ -88,11 +171,12 @@ export interface InflationProjectionYearRow {
   nominalPaddyCostAr: number;
   nominalInputsAndOpsCostAr: number;
   nominalFixedChargesAr: number;
+  nominalTotalProductionCostAr: number;
   nominalNetAfterTaxAr: number;
   realNetAfterTaxAr: number; // deflated to constant A1 Ariary
   nominalMarginRate: number;
   constantBaselineNetAfterTaxAr: number; // A1 net scaled only by physical volume growth (0% inflation benchmark)
-  inflationMarginImpactAr: number; // nominal - constantBaseline (or real - constantBaseline)
+  inflationMarginImpactAr: number; // real - constantBaseline
 }
 
 export interface AgriculturalInflationSummary {
@@ -139,45 +223,72 @@ export function computeAgriculturalInflation5Y(
   const discountRate = assumptions.discountRate;
   const i0 = model.investment.fundsToRaiseAr;
 
-  const iPaddy = params.paddyInflationRatePct / 100;
-  const iInputs = params.inputsAndFuelInflationRatePct / 100;
-  const iFixed = params.fixedChargesInflationRatePct / 100;
   const iCpi = params.generalCpiDeflatorPct / 100;
   const passThrough = Math.max(0, Math.min(1.5, params.sellingPricePassThroughPct / 100));
   const gVol = params.volumeGrowthPctPerYear / 100;
 
-  // Blended cost inflation rate used for pass-through selling price indexation
+  const isVariable = params.inflationMode === 'variable';
   const totalBaseCost = Math.max(basePaddyAnnualCostAr + baseInputsAndOpsCostAr + baseFixedAr, 1);
-  const blendedCostInflationRate =
-    (basePaddyAnnualCostAr * iPaddy +
-      baseInputsAndOpsCostAr * iInputs +
-      baseFixedAr * iFixed) /
-    totalBaseCost;
-  const effectiveSellingPriceInflation = blendedCostInflationRate * passThrough;
 
   const years: InflationProjectionYearRow[] = [];
   let npv5YNominalSum = 0;
   let npv5YRealSum = 0;
 
+  let paddyFactor = 1;
+  let inputsFactor = 1;
+  let fixedFactor = 1;
+  let sellPriceFactor = 1;
+
   for (let year = 1; year <= 5; year++) {
     const t = year - 1;
+    const varRow = params.annualVariableRates?.find((r) => r.year === year);
+
+    const stepPaddyPct = isVariable
+      ? (varRow?.paddyRatePct ?? params.paddyInflationRatePct)
+      : year === 1
+      ? 0
+      : params.paddyInflationRatePct;
+    const stepInputsPct = isVariable
+      ? (varRow?.inputsRatePct ?? params.inputsAndFuelInflationRatePct)
+      : year === 1
+      ? 0
+      : params.inputsAndFuelInflationRatePct;
+    const stepFixedPct = isVariable
+      ? (varRow?.fixedRatePct ?? params.fixedChargesInflationRatePct)
+      : year === 1
+      ? 0
+      : params.fixedChargesInflationRatePct;
+
+    const rPaddy = stepPaddyPct / 100;
+    const rInputs = stepInputsPct / 100;
+    const rFixed = stepFixedPct / 100;
+
+    // Weight cost inflation by current cost shares for realistic annual pass-through
+    const curPaddyWeight = basePaddyAnnualCostAr * paddyFactor;
+    const curInputsWeight = baseInputsAndOpsCostAr * inputsFactor;
+    const curFixedWeight = baseFixedAr * fixedFactor;
+    const curWeightSum = Math.max(curPaddyWeight + curInputsWeight + curFixedWeight, totalBaseCost);
+
+    const stepBlendedCostInflation =
+      (curPaddyWeight * rPaddy + curInputsWeight * rInputs + curFixedWeight * rFixed) /
+      curWeightSum;
+
+    paddyFactor = paddyFactor * (1 + rPaddy);
+    inputsFactor = inputsFactor * (1 + rInputs);
+    fixedFactor = fixedFactor * (1 + rFixed);
+    sellPriceFactor = sellPriceFactor * (1 + stepBlendedCostInflation * passThrough);
+
     const volFactor = Math.pow(1 + gVol, t);
-    const paddyFactor = Math.pow(1 + iPaddy, t);
-    const inputsFactor = Math.pow(1 + iInputs, t);
-    const fixedFactor = Math.pow(1 + iFixed, t);
-    const sellPriceFactor = Math.pow(1 + effectiveSellingPriceInflation, t);
     const cpiDeflatorFactor = Math.pow(1 + iCpi, t);
 
     const nominalTurnoverAr = baseTurnoverAr * volFactor * sellPriceFactor;
     const nominalPaddyCostAr = basePaddyAnnualCostAr * volFactor * paddyFactor;
     const nominalInputsAndOpsCostAr = baseInputsAndOpsCostAr * volFactor * inputsFactor;
     const nominalFixedChargesAr = baseFixedAr * fixedFactor;
+    const nominalTotalProductionCostAr =
+      nominalPaddyCostAr + nominalInputsAndOpsCostAr + nominalFixedChargesAr;
 
-    const nominalNetBeforeTax =
-      nominalTurnoverAr -
-      nominalPaddyCostAr -
-      nominalInputsAndOpsCostAr -
-      nominalFixedChargesAr;
+    const nominalNetBeforeTax = nominalTurnoverAr - nominalTotalProductionCostAr;
     const nominalTax = Math.max(0, nominalNetBeforeTax) * taxRate;
     const nominalNetAfterTaxAr = nominalNetBeforeTax - nominalTax;
     const realNetAfterTaxAr =
@@ -196,6 +307,10 @@ export function computeAgriculturalInflation5Y(
     years.push({
       year,
       label: `A${year}`,
+      appliedPaddyInflationPct: Number(stepPaddyPct.toFixed(1)),
+      appliedInputsInflationPct: Number(stepInputsPct.toFixed(1)),
+      appliedFixedInflationPct: Number(stepFixedPct.toFixed(1)),
+      appliedTotalCostInflationPct: Number((stepBlendedCostInflation * 100).toFixed(1)),
       paddyPriceHsArPerKg: Math.round(basePaddyHs * paddyFactor),
       paddyPriceBsArPerKg: Math.round(basePaddyBs * paddyFactor),
       riceSellingPriceHsArPerKg: Math.round(baseRicePriceHs * sellPriceFactor),
@@ -205,6 +320,7 @@ export function computeAgriculturalInflation5Y(
       nominalPaddyCostAr: Math.round(nominalPaddyCostAr),
       nominalInputsAndOpsCostAr: Math.round(nominalInputsAndOpsCostAr),
       nominalFixedChargesAr: Math.round(nominalFixedChargesAr),
+      nominalTotalProductionCostAr: Math.round(nominalTotalProductionCostAr),
       nominalNetAfterTaxAr: Math.round(nominalNetAfterTaxAr),
       realNetAfterTaxAr: Math.round(realNetAfterTaxAr),
       nominalMarginRate: nominalTurnoverAr > 0 ? nominalNetAfterTaxAr / nominalTurnoverAr : 0,

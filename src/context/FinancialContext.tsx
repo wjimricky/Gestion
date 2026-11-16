@@ -15,6 +15,10 @@ import {
   MarketComparisonAssumptions,
   MachineMaintenanceSchedule,
   VatAssumptions,
+  CommunalTaxesAssumptions,
+  StockManagementAssumptions,
+  CompetitorBenchmarkAssumptions,
+  FixedAssetsAssumptions,
 } from '../types/finance';
 import {
   ExcelImportMetadata,
@@ -38,6 +42,7 @@ import {
 import { validateAssumptions, ValidationResult } from '../utils/validation';
 import { createDefaultPestelAnalysis } from '../utils/pestelDefaults';
 import {
+  applyLogisticsToCostsPerRotation,
   computeSeasonLogisticsBreakdown,
   evaluateKpiThresholdAlerts,
   getResolvedKpiThresholds,
@@ -45,6 +50,11 @@ import {
   KpiAlertsEvaluation,
   ROAD_CONDITION_META,
 } from '../utils/logistics';
+import {
+  applyStockCostsToFixedCharges,
+  getResolvedStockManagement,
+} from '../utils/stockManagement';
+import { getResolvedCompetitors } from '../utils/competitors';
 import {
   CLIMATE_HAZARD_META,
   getResolvedClimateImpact,
@@ -98,6 +108,14 @@ import {
   ProductionZoneId,
 } from '../utils/productionZones';
 import { getResolvedVatAssumptions } from '../utils/vatMadagascar';
+import {
+  applyCommunalTaxesToAssumptions,
+  getResolvedCommunalTaxes,
+} from '../utils/communalTaxes';
+import {
+  computeFixedAssetsAnalysis,
+  getResolvedFixedAssets,
+} from '../utils/fixedAssets';
 import {
   EmailAlertHistoryEntry,
   EmailAlertRuleConfig,
@@ -167,6 +185,7 @@ interface FinancialContextType {
     category: PestelCategoryKey,
     patch: Partial<Omit<PestelFactorEntry, 'category' | 'updatedAt'>>
   ) => void;
+  savePestelAnalysis: () => void;
   resetPestelAnalysis: () => void;
   kpiNotes: KpiNoteItem[];
   analystName: string;
@@ -239,8 +258,12 @@ interface FinancialContextType {
     patch: Partial<TraceabilityCertificationAssumptions>
   ) => void;
   updateMarketComparison: (patch: Partial<MarketComparisonAssumptions>) => void;
+  updateCompetitors: (patch: Partial<CompetitorBenchmarkAssumptions>) => void;
   updateMachineMaintenance: (patch: Partial<MachineMaintenanceSchedule>) => void;
   updateVatSettings: (patch: Partial<VatAssumptions>) => void;
+  updateCommunalTaxes: (patch: Partial<CommunalTaxesAssumptions>) => void;
+  updateStockManagement: (patch: Partial<StockManagementAssumptions>) => void;
+  updateFixedAssets: (patch: Partial<FixedAssetsAssumptions>) => void;
   updateKpiThresholds: (patch: Partial<KpiAlertThresholds>) => void;
   // Dynamic cost list updaters
   updateVariableCostPerKg: (id: string, field: 'costHS' | 'costBS' | 'label', value: string | number) => void;
@@ -963,9 +986,14 @@ export const FinancialProvider: React.FC<{ children: ReactNode }> = ({ children 
         const storageLossActive =
           currentStorage.enabled &&
           computeStorageWeightLossRate(currentStorage).totalLossRate > 1e-6;
+        const hasActiveCustomCoeff = Boolean(
+          currentClimate.useCustomCoefficients &&
+            (currentClimate.customCoefficients ?? []).some((c) => c.active)
+        );
         const climateActive =
           currentClimate.enabled &&
-          (currentClimate.hazardType !== 'normal' ||
+          (hasActiveCustomCoeff ||
+            currentClimate.hazardType !== 'normal' ||
             Math.abs(currentClimate.fieldYieldShockPercent) > 1e-6 ||
             Math.abs(currentClimate.millingYieldDeltaPoints) > 1e-6);
 
@@ -1016,6 +1044,24 @@ export const FinancialProvider: React.FC<{ children: ReactNode }> = ({ children 
               season === 'basseSaison' ? cleanVal : currentMaint.baselineRotationsBS,
           };
         }
+      }
+      // Keep urban distribution freight cost synced when active and tonnage/yield changes
+      const curLog = getResolvedLogistics(nextState);
+      if (curLog.enabled && curLog.includeUrbanDistribution) {
+        nextState.costsPerRotation = applyLogisticsToCostsPerRotation(
+          nextState.costsPerRotation,
+          curLog,
+          nextState
+        );
+      }
+      // Keep storage fixed charges synced when stock management is enabled
+      const curStock = getResolvedStockManagement(nextState);
+      if (curStock.enabled && curStock.syncCostsToModel) {
+        nextState.fixedMonthlyCharges = applyStockCostsToFixedCharges(
+          nextState.fixedMonthlyCharges,
+          nextState,
+          curStock
+        );
       }
       return nextState;
     });
@@ -1214,36 +1260,73 @@ export const FinancialProvider: React.FC<{ children: ReactNode }> = ({ children 
       );
     }
 
+    if (
+      patch.includeUrbanDistribution !== undefined &&
+      patch.includeUrbanDistribution !== prevLog.includeUrbanDistribution
+    ) {
+      recordAuditChange(
+        'logistics.includeUrbanDistribution',
+        'Fret Rizerie → Marchés urbains',
+        prevLog.includeUrbanDistribution ? 'Activé' : 'Désactivé',
+        nextLog.includeUrbanDistribution ? 'Activé' : 'Désactivé',
+        'Formulaire'
+      );
+    }
+    if (
+      patch.distanceToUrbanMarketKmHS !== undefined &&
+      patch.distanceToUrbanMarketKmHS !== prevLog.distanceToUrbanMarketKmHS
+    ) {
+      recordAuditChange(
+        'logistics.distanceUrbanHS',
+        'Distance marché urbain (HS)',
+        `${prevLog.distanceToUrbanMarketKmHS ?? 0} km`,
+        `${nextLog.distanceToUrbanMarketKmHS ?? 0} km`,
+        'Formulaire'
+      );
+    }
+    if (
+      patch.distanceToUrbanMarketKmBS !== undefined &&
+      patch.distanceToUrbanMarketKmBS !== prevLog.distanceToUrbanMarketKmBS
+    ) {
+      recordAuditChange(
+        'logistics.distanceUrbanBS',
+        'Distance marché urbain (BS)',
+        `${prevLog.distanceToUrbanMarketKmBS ?? 0} km`,
+        `${nextLog.distanceToUrbanMarketKmBS ?? 0} km`,
+        'Formulaire'
+      );
+    }
+    if (
+      patch.urbanFreightArPerTonKm !== undefined &&
+      patch.urbanFreightArPerTonKm !== prevLog.urbanFreightArPerTonKm
+    ) {
+      recordAuditChange(
+        'logistics.urbanFreight',
+        'Tarif fret urbain (Ar/t·km)',
+        `${formatInt(prevLog.urbanFreightArPerTonKm ?? 320)} Ar/t·km`,
+        `${formatInt(nextLog.urbanFreightArPerTonKm ?? 320)} Ar/t·km`,
+        'Formulaire'
+      );
+    }
+
     setAssumptions((prev) => {
       const mergedLog: LogisticsAssumptions = {
         ...getResolvedLogistics(prev),
         ...patch,
       };
+      const nextCostsPerRotation = applyLogisticsToCostsPerRotation(
+        prev.costsPerRotation,
+        mergedLog,
+        prev
+      );
+
       if (!mergedLog.enabled) {
         return {
           ...prev,
           logistics: mergedLog,
+          costsPerRotation: nextCostsPerRotation,
         };
       }
-
-      const hsCost = computeSeasonLogisticsBreakdown(mergedLog, 'hauteSaison').totalCostPerRotationAr;
-      const bsCost = computeSeasonLogisticsBreakdown(mergedLog, 'basseSaison').totalCostPerRotationAr;
-      const hasFuelItem = prev.costsPerRotation.some((c) => c.id === 'rot-carburant');
-      const nextCostsPerRotation = hasFuelItem
-        ? prev.costsPerRotation.map((c) =>
-            c.id === 'rot-carburant'
-              ? { ...c, costHS: hsCost, costBS: bsCost }
-              : c
-          )
-        : [
-            {
-              id: 'rot-carburant',
-              label: 'Carburant & Collecte paddy',
-              costHS: hsCost,
-              costBS: bsCost,
-            },
-            ...prev.costsPerRotation,
-          ];
 
       return {
         ...prev,
@@ -1320,6 +1403,32 @@ export const FinancialProvider: React.FC<{ children: ReactNode }> = ({ children 
         patch.enabled ? 'Active' : 'Simulée seule',
         'Formulaire'
       );
+    } else if (
+      patch.useCustomCoefficients !== undefined &&
+      patch.useCustomCoefficients !== prevClimate.useCustomCoefficients
+    ) {
+      recordAuditChange(
+        'climate.useCustomCoefficients',
+        'Mode coefficients multi-aléas',
+        prevClimate.useCustomCoefficients ? 'Multi-aléas actifs' : 'Scénario simple',
+        patch.useCustomCoefficients ? 'Multi-aléas actifs' : 'Scénario simple',
+        'Formulaire'
+      );
+    } else if (patch.customCoefficients !== undefined) {
+      const prevActiveCount = (prevClimate.customCoefficients ?? []).filter((c) => c.active).length;
+      const nextActiveCount = patch.customCoefficients.filter((c) => c.active).length;
+      if (
+        prevActiveCount !== nextActiveCount ||
+        (prevClimate.customCoefficients ?? []).length !== patch.customCoefficients.length
+      ) {
+        recordAuditChange(
+          'climate.customCoefficients',
+          'Coefficients perte climatique',
+          `${(prevClimate.customCoefficients ?? []).length} coeff. (${prevActiveCount} actif(s))`,
+          `${patch.customCoefficients.length} coeff. (${nextActiveCount} actif(s))`,
+          'Formulaire'
+        );
+      }
     }
 
     setAssumptions((prev) => {
@@ -1737,6 +1846,29 @@ export const FinancialProvider: React.FC<{ children: ReactNode }> = ({ children 
     }));
   };
 
+  const updateCompetitors = (patch: Partial<CompetitorBenchmarkAssumptions>) => {
+    const prevComp = getResolvedCompetitors(assumptionsRef.current);
+    if (
+      patch.ourTargetSharePct !== undefined &&
+      patch.ourTargetSharePct !== prevComp.ourTargetSharePct
+    ) {
+      recordAuditChange(
+        'competitors.ourTargetSharePct',
+        'Part de marché cible (Concurrence)',
+        `${prevComp.ourTargetSharePct} %`,
+        `${patch.ourTargetSharePct} %`,
+        'Formulaire'
+      );
+    }
+    setAssumptions((prev) => ({
+      ...prev,
+      competitors: {
+        ...getResolvedCompetitors(prev),
+        ...patch,
+      },
+    }));
+  };
+
   const updateMachineMaintenance = (patch: Partial<MachineMaintenanceSchedule>) => {
     const prevMaint = getResolvedMaintenanceSchedule(assumptionsRef.current);
     const nextMaint: MachineMaintenanceSchedule = {
@@ -1820,6 +1952,210 @@ export const FinancialProvider: React.FC<{ children: ReactNode }> = ({ children 
     }));
   };
 
+  const updateCommunalTaxes = (patch: Partial<CommunalTaxesAssumptions>) => {
+    const prevTax = getResolvedCommunalTaxes(assumptionsRef.current);
+    const nextTax: CommunalTaxesAssumptions = {
+      ...prevTax,
+      ...patch,
+    };
+
+    if (patch.enabled !== undefined && patch.enabled !== prevTax.enabled) {
+      recordAuditChange(
+        'communalTaxes.enabled',
+        'Taxes communales & redevances → Modèle',
+        prevTax.enabled ? 'Intégrées' : 'Simulées seules',
+        nextTax.enabled ? 'Intégrées' : 'Simulées seules',
+        'Formulaire'
+      );
+    } else if (patch.presetId !== undefined && patch.presetId !== prevTax.presetId) {
+      recordAuditChange(
+        'communalTaxes.presetId',
+        'Profil fiscal communal',
+        prevTax.communeName,
+        nextTax.communeName,
+        'Formulaire'
+      );
+    } else if (
+      patch.ristourneArPerKgPaddy !== undefined &&
+      patch.ristourneArPerKgPaddy !== prevTax.ristourneArPerKgPaddy
+    ) {
+      recordAuditChange(
+        'communalTaxes.ristourne',
+        'Ristourne communale (paddy)',
+        `${formatInt(prevTax.ristourneArPerKgPaddy)} Ar/kg`,
+        `${formatInt(nextTax.ristourneArPerKgPaddy)} Ar/kg`,
+        'Formulaire'
+      );
+    } else if (
+      patch.landRoyaltyArPerHaYear !== undefined &&
+      patch.landRoyaltyArPerHaYear !== prevTax.landRoyaltyArPerHaYear
+    ) {
+      recordAuditChange(
+        'communalTaxes.landRoyalty',
+        'Redevance foncière / ha',
+        `${formatInt(prevTax.landRoyaltyArPerHaYear)} Ar/ha/an`,
+        `${formatInt(nextTax.landRoyaltyArPerHaYear)} Ar/ha/an`,
+        'Formulaire'
+      );
+    }
+
+    setAssumptions((prev) => {
+      const resolvedPrev = getResolvedCommunalTaxes(prev);
+      const mergedTax: CommunalTaxesAssumptions = {
+        ...resolvedPrev,
+        ...patch,
+      };
+      const syncedCosts = applyCommunalTaxesToAssumptions(prev, mergedTax);
+      return {
+        ...prev,
+        communalTaxes: mergedTax,
+        ...syncedCosts,
+      };
+    });
+  };
+
+  const updateStockManagement = (patch: Partial<StockManagementAssumptions>) => {
+    const prevStock = getResolvedStockManagement(assumptionsRef.current);
+    const nextStock: StockManagementAssumptions = {
+      ...prevStock,
+      ...patch,
+    };
+
+    if (patch.enabled !== undefined && patch.enabled !== prevStock.enabled) {
+      recordAuditChange(
+        'stockManagement.enabled',
+        'Gestion stocks paddy/riz → Modèle',
+        prevStock.enabled ? 'Activée' : 'Simulée seule',
+        nextStock.enabled ? 'Activée' : 'Simulée seule',
+        'Formulaire'
+      );
+    } else if (
+      patch.paddyHoldingDaysHS !== undefined &&
+      patch.paddyHoldingDaysHS !== prevStock.paddyHoldingDaysHS
+    ) {
+      recordAuditChange(
+        'stockManagement.paddyDaysHS',
+        'Durée stockage paddy (HS)',
+        `${prevStock.paddyHoldingDaysHS} j`,
+        `${nextStock.paddyHoldingDaysHS} j`,
+        'Formulaire'
+      );
+    } else if (
+      patch.milledRiceHoldingDaysHS !== undefined &&
+      patch.milledRiceHoldingDaysHS !== prevStock.milledRiceHoldingDaysHS
+    ) {
+      recordAuditChange(
+        'stockManagement.riceDaysHS',
+        'Durée stockage riz usiné (HS)',
+        `${prevStock.milledRiceHoldingDaysHS} j`,
+        `${nextStock.milledRiceHoldingDaysHS} j`,
+        'Formulaire'
+      );
+    } else if (
+      patch.targetHoldingReductionPct !== undefined &&
+      patch.targetHoldingReductionPct !== prevStock.targetHoldingReductionPct
+    ) {
+      recordAuditChange(
+        'stockManagement.bfrReduction',
+        'Objectif optimisation rotation stock',
+        `${prevStock.targetHoldingReductionPct} %`,
+        `${nextStock.targetHoldingReductionPct} %`,
+        'Formulaire'
+      );
+    }
+
+    setAssumptions((prev) => {
+      const mergedStock: StockManagementAssumptions = {
+        ...getResolvedStockManagement(prev),
+        ...patch,
+      };
+      const nextFixed = applyStockCostsToFixedCharges(
+        prev.fixedMonthlyCharges,
+        prev,
+        mergedStock
+      );
+      return {
+        ...prev,
+        stockManagement: mergedStock,
+        fixedMonthlyCharges: nextFixed,
+      };
+    });
+  };
+
+  const updateFixedAssets = (patch: Partial<FixedAssetsAssumptions>) => {
+    const prevAssets = getResolvedFixedAssets(assumptionsRef.current);
+    const nextAssets: FixedAssetsAssumptions = {
+      ...prevAssets,
+      ...patch,
+    };
+
+    if (patch.applyToModel !== undefined && patch.applyToModel !== prevAssets.applyToModel) {
+      recordAuditChange(
+        'fixedAssets.applyToModel',
+        'Dotations amortissements → Résultat & IR',
+        prevAssets.applyToModel ? 'Intégrées au modèle' : 'Simulées seules',
+        nextAssets.applyToModel ? 'Intégrées au modèle' : 'Simulées seules',
+        'Formulaire'
+      );
+    } else if (
+      patch.syncCapexToInvestment !== undefined &&
+      patch.syncCapexToInvestment !== prevAssets.syncCapexToInvestment
+    ) {
+      recordAuditChange(
+        'fixedAssets.syncCapexToInvestment',
+        'Synchro Actifs A1 → CapEx Matériel I₀',
+        prevAssets.syncCapexToInvestment ? 'Synchronisée' : 'Indépendante',
+        nextAssets.syncCapexToInvestment ? 'Synchronisée' : 'Indépendante',
+        'Formulaire'
+      );
+    } else if (patch.items !== undefined && patch.items.length !== prevAssets.items.length) {
+      recordAuditChange(
+        'fixedAssets.items',
+        'Registre des immobilisations',
+        `${prevAssets.items.length} actifs`,
+        `${nextAssets.items.length} actifs`,
+        'Formulaire'
+      );
+    }
+
+    setAssumptions((prev) => {
+      const resolvedPrev = getResolvedFixedAssets(prev);
+      const merged: FixedAssetsAssumptions = {
+        ...resolvedPrev,
+        ...patch,
+      };
+
+      let nextMaterielAr = prev.investment.materielAr;
+      let nextBaselineMateriel = merged.baselineMaterielAr;
+
+      if (patch.syncCapexToInvestment === true && !resolvedPrev.syncCapexToInvestment) {
+        nextBaselineMateriel = prev.investment.materielAr;
+      }
+
+      if (merged.syncCapexToInvestment) {
+        const analysis = computeFixedAssetsAnalysis({
+          ...prev,
+          fixedAssets: merged,
+        });
+        nextMaterielAr = analysis.year1CapexAr;
+      } else if (patch.syncCapexToInvestment === false && resolvedPrev.syncCapexToInvestment) {
+        nextMaterielAr = nextBaselineMateriel;
+      }
+
+      return {
+        ...prev,
+        fixedAssets: {
+          ...merged,
+          baselineMaterielAr: nextBaselineMateriel,
+        },
+        investment: {
+          ...prev.investment,
+          materielAr: nextMaterielAr,
+        },
+      };
+    });
+  };
+
   const updateKpiThresholds = (patch: Partial<KpiAlertThresholds>) => {
     const prevT = getResolvedKpiThresholds(assumptionsRef.current);
     const nextT: KpiAlertThresholds = {
@@ -1853,6 +2189,18 @@ export const FinancialProvider: React.FC<{ children: ReactNode }> = ({ children 
         'Seuil alerte Payback max.',
         `${prevT.maxPaybackMonths} mois`,
         `${nextT.maxPaybackMonths} mois`,
+        'Formulaire'
+      );
+    }
+    if (
+      patch.minNetMarginRate !== undefined &&
+      patch.minNetMarginRate !== (prevT.minNetMarginRate ?? 0.08)
+    ) {
+      recordAuditChange(
+        'kpiThresholds.minNetMarginRate',
+        'Seuil alerte Marge nette min.',
+        formatPctVal(prevT.minNetMarginRate ?? 0.08, 1),
+        formatPctVal(nextT.minNetMarginRate ?? 0.08, 1),
         'Formulaire'
       );
     }
@@ -2653,6 +3001,28 @@ export const FinancialProvider: React.FC<{ children: ReactNode }> = ({ children 
     []
   );
 
+  const savePestelAnalysis = useCallback(() => {
+    const nowIso = new Date().toISOString();
+    setProjects((prev) => {
+      const nextProjects = prev.map((proj) =>
+        proj.id === activeProjectId
+          ? {
+              ...proj,
+              pestelAnalysis,
+              updatedAt: nowIso,
+            }
+          : proj
+      );
+      try {
+        localStorage.setItem(LOCAL_STORAGE_KEY_PROJECTS, JSON.stringify(nextProjects));
+      } catch {
+        // Ignore storage quota errors
+      }
+      return nextProjects;
+    });
+    notify('success', 'Analyse PESTEL sauvegardée pour le projet actif.');
+  }, [activeProjectId, notify, pestelAnalysis]);
+
   const resetPestelAnalysis = useCallback(() => {
     setPestelAnalysis(createDefaultPestelAnalysis());
     notify('info', 'Analyse PESTEL réinitialisée sur le référentiel filière riz Madagascar.');
@@ -2846,6 +3216,7 @@ export const FinancialProvider: React.FC<{ children: ReactNode }> = ({ children 
         exportEmailAlertHistoryCsv,
         pestelAnalysis,
         updatePestelCategory,
+        savePestelAnalysis,
         resetPestelAnalysis,
         kpiNotes,
         analystName,
@@ -2878,8 +3249,12 @@ export const FinancialProvider: React.FC<{ children: ReactNode }> = ({ children 
         updateSubsidies,
         updateTraceabilityCertification,
         updateMarketComparison,
+        updateCompetitors,
         updateMachineMaintenance,
         updateVatSettings,
+        updateCommunalTaxes,
+        updateStockManagement,
+        updateFixedAssets,
         updateKpiThresholds,
         updateVariableCostPerKg,
         addVariableCostPerKg,

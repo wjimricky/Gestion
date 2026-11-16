@@ -55,7 +55,12 @@ export interface MonthlyTreasuryRow {
   phaseLabel: string;
   isSoudure: boolean;
   openingCashAr: number;
+  riceSalesInflowAr: number;
+  byproductSalesInflowAr: number;
   inflowsAr: number;
+  paddyPurchaseOutflowAr: number;
+  millingAndBagsOutflowAr: number;
+  rotationLogisticsOutflowAr: number;
   variableOutflowsAr: number;
   fixedOutflowsAr: number;
   taxOutflowsAr: number;
@@ -65,6 +70,7 @@ export interface MonthlyTreasuryRow {
   endingCashAr: number;
   bfrPerRotationAr: number;
   intraMonthMinCashAr: number;
+  bfrCoverageDays: number;
   riskLevel: TreasuryRiskLevel;
   riskReason: string;
 }
@@ -86,6 +92,17 @@ export interface TreasuryPlanSummary {
   vigilanceMonthsCount: number;
   recommendedShortTermFacilityAr: number;
   overallRisk: TreasuryRiskLevel;
+  // Annual totals for detailed Year 1 Cash Budget
+  totalInflowsAr: number;
+  totalRiceInflowsAr: number;
+  totalByproductInflowsAr: number;
+  totalOutflowsAr: number;
+  totalPaddyOutflowsAr: number;
+  totalMillingBagsOutflowsAr: number;
+  totalLogisticsOutflowsAr: number;
+  totalFixedOutflowsAr: number;
+  totalTaxOutflowsAr: number;
+  netAnnualCashFlowAr: number;
 }
 
 export function buildMonthlyTreasuryPlan(
@@ -115,10 +132,52 @@ export function buildMonthlyTreasuryPlan(
 
   const monthlyFixed = model.year1.monthlyFixedChargesAr;
 
+  // Season revenue splits (Rice vs Byproducts)
+  const hsRiceTurnoverShare =
+    hs.turnoverPerRotationAr > 0
+      ? (hs.riceKgPerRotation * hs.riceSellingPriceAr) / hs.turnoverPerRotationAr
+      : 0.96;
+  const bsRiceTurnoverShare =
+    bs.turnoverPerRotationAr > 0
+      ? (bs.riceKgPerRotation * bs.riceSellingPriceAr) / bs.turnoverPerRotationAr
+      : 0.96;
+
+  // Season operating outflow splits (Pure Paddy vs Milling/Bags vs Logistics/Rotations)
+  const paddyLine = model.assumptions.costsPerKgPaddy.find((c) => c.id === 'cost-paddy');
+  const computeSeasonOutflowSplits = (seasonKey: 'hauteSaison' | 'basseSaison') => {
+    const sRes = seasonKey === 'hauteSaison' ? hs : bs;
+    const months = Math.max(1, sRes.months);
+    const rot = sRes.totalRotations;
+    const purePaddyPerKg = paddyLine
+      ? seasonKey === 'hauteSaison'
+        ? paddyLine.costHS
+        : paddyLine.costBS
+      : sRes.costPerKgPaddyAr * 0.85;
+    const purePaddyAnnual = purePaddyPerKg * sRes.totalPaddyKg;
+    const otherKgCostsAnnual =
+      Math.max(0, sRes.costPerKgPaddyAr - purePaddyPerKg) * sRes.totalPaddyKg;
+    const bagsAnnual = sRes.bagCostPerRotationAr * rot;
+    const millingAndBagsAnnual = otherKgCostsAnnual + bagsAnnual;
+    const logisticsAndRotAnnual = Math.max(
+      0,
+      sRes.totalPurchaseAndOperatingCostsAr - purePaddyAnnual - millingAndBagsAnnual
+    );
+    return {
+      paddyMonthly: purePaddyAnnual / months,
+      millingBagsMonthly: millingAndBagsAnnual / months,
+      logisticsRotMonthly: logisticsAndRotAnnual / months,
+    };
+  };
+
+  const hsOutSplit = computeSeasonOutflowSplits('hauteSaison');
+  const bsOutSplit = computeSeasonOutflowSplits('basseSaison');
+
   // Compute raw theoretical monthly CA series for DSO shift
   const rawMonthlyInflows: number[] = [];
+  const rawMonthlyRiceShares: number[] = [];
   for (let m = 0; m < totalMonths; m++) {
     rawMonthlyInflows.push(m < hsMonths ? hsMonthlyCA : bsMonthlyCA);
+    rawMonthlyRiceShares.push(m < hsMonths ? hsRiceTurnoverShare : bsRiceTurnoverShare);
   }
 
   // DSO lag ratio (0, 0.5, 1.0, 1.5 months)
@@ -135,7 +194,6 @@ export function buildMonthlyTreasuryPlan(
     bsMonths > 0 ? totalPrestockBudget / bsMonths : 0;
 
   // Identify Soudure window: Basse Saison, with peak criticality in the final 4 months of Basse Saison
-  // (corresponding to Dec–Mar before the new main harvest in Madagascar)
   const soudureStartRelative = hsMonths + Math.max(0, bsMonths - 4);
 
   const rows: MonthlyTreasuryRow[] = [];
@@ -155,14 +213,25 @@ export function buildMonthlyTreasuryPlan(
 
     // Delayed cash collections under client DSO
     let inflowsAr = rawMonthlyInflows[m];
+    let riceShare = rawMonthlyRiceShares[m];
     if (lagMonths > 0) {
       const wholeLag = Math.floor(lagMonths);
       const fracLag = lagMonths - wholeLag;
       const prevA = m - wholeLag >= 0 ? rawMonthlyInflows[m - wholeLag] : 0;
       const prevB = m - wholeLag - 1 >= 0 ? rawMonthlyInflows[m - wholeLag - 1] : 0;
       inflowsAr = prevA * (1 - fracLag) + prevB * fracLag;
+      const shareA = m - wholeLag >= 0 ? rawMonthlyRiceShares[m - wholeLag] : riceShare;
+      const shareB = m - wholeLag - 1 >= 0 ? rawMonthlyRiceShares[m - wholeLag - 1] : shareA;
+      const denom = prevA * (1 - fracLag) + prevB * fracLag;
+      if (denom > 0) {
+        riceShare = (prevA * (1 - fracLag) * shareA + prevB * fracLag * shareB) / denom;
+      }
     }
 
+    const riceSalesInflowAr = inflowsAr * riceShare;
+    const byproductSalesInflowAr = Math.max(0, inflowsAr - riceSalesInflowAr);
+
+    const outSplit = isHS ? hsOutSplit : bsOutSplit;
     const baseVarOut = isHS ? hsMonthlyVarOut : bsMonthlyVarOut;
     // If prestocking in late HS, outflows rise in late HS and drop during BS
     const isPrestockBuildMonth =
@@ -173,6 +242,9 @@ export function buildMonthlyTreasuryPlan(
       ? -monthlyPrestockRelease
       : 0;
 
+    const paddyPurchaseOutflowAr = Math.max(0, outSplit.paddyMonthly + prestockOutflowAr);
+    const millingAndBagsOutflowAr = outSplit.millingBagsMonthly;
+    const rotationLogisticsOutflowAr = outSplit.logisticsRotMonthly;
     const variableOutflowsAr = Math.max(0, baseVarOut + prestockOutflowAr);
     const fixedOutflowsAr = monthlyFixed;
 
@@ -184,12 +256,12 @@ export function buildMonthlyTreasuryPlan(
     const openingCashAr = runningCash;
     const endingCashAr = openingCashAr + netMonthlyCashFlowAr;
 
-    // Intra-month working capital peak: before monthly sales are collected,
-    // operator must fund at least 1 rotation's BFR + fixed charges upfront
     const bfrPerRotationAr = isHS ? hs.totalCostPerRotationAr : bs.totalCostPerRotationAr;
     const intraMonthMinCashAr = openingCashAr - bfrPerRotationAr - fixedOutflowsAr * 0.5;
     const effectiveFloorWithCredit = intraMonthMinCashAr + settings.creditLineAr;
     const effectiveEndingWithCredit = endingCashAr + settings.creditLineAr;
+    const bfrCoverageDays =
+      totalOutflowsAr > 0 ? Math.max(0, (endingCashAr / (totalOutflowsAr / 30))) : 0;
 
     if (intraMonthMinCashAr < minCashTroughAr) {
       minCashTroughAr = intraMonthMinCashAr;
@@ -230,7 +302,12 @@ export function buildMonthlyTreasuryPlan(
           : 'Basse Saison (Transition)',
       isSoudure: !isHS,
       openingCashAr,
+      riceSalesInflowAr,
+      byproductSalesInflowAr,
       inflowsAr,
+      paddyPurchaseOutflowAr,
+      millingAndBagsOutflowAr,
+      rotationLogisticsOutflowAr,
       variableOutflowsAr,
       fixedOutflowsAr,
       taxOutflowsAr,
@@ -240,6 +317,7 @@ export function buildMonthlyTreasuryPlan(
       endingCashAr,
       bfrPerRotationAr,
       intraMonthMinCashAr,
+      bfrCoverageDays,
       riskLevel,
       riskReason,
     });
@@ -273,6 +351,17 @@ export function buildMonthlyTreasuryPlan(
       ? 'vigilance'
       : 'optimal';
 
+  const totalInflowsAr = rows.reduce((s, r) => s + r.inflowsAr, 0);
+  const totalRiceInflowsAr = rows.reduce((s, r) => s + r.riceSalesInflowAr, 0);
+  const totalByproductInflowsAr = rows.reduce((s, r) => s + r.byproductSalesInflowAr, 0);
+  const totalOutflowsAr = rows.reduce((s, r) => s + r.totalOutflowsAr, 0);
+  const totalPaddyOutflowsAr = rows.reduce((s, r) => s + r.paddyPurchaseOutflowAr, 0);
+  const totalMillingBagsOutflowsAr = rows.reduce((s, r) => s + r.millingAndBagsOutflowAr, 0);
+  const totalLogisticsOutflowsAr = rows.reduce((s, r) => s + r.rotationLogisticsOutflowAr, 0);
+  const totalFixedOutflowsAr = rows.reduce((s, r) => s + r.fixedOutflowsAr, 0);
+  const totalTaxOutflowsAr = rows.reduce((s, r) => s + r.taxOutflowsAr, 0);
+  const netAnnualCashFlowAr = totalInflowsAr - totalOutflowsAr;
+
   return {
     settings,
     rows,
@@ -290,6 +379,16 @@ export function buildMonthlyTreasuryPlan(
     vigilanceMonthsCount,
     recommendedShortTermFacilityAr,
     overallRisk,
+    totalInflowsAr,
+    totalRiceInflowsAr,
+    totalByproductInflowsAr,
+    totalOutflowsAr,
+    totalPaddyOutflowsAr,
+    totalMillingBagsOutflowsAr,
+    totalLogisticsOutflowsAr,
+    totalFixedOutflowsAr,
+    totalTaxOutflowsAr,
+    netAnnualCashFlowAr,
   };
 }
 
@@ -301,14 +400,20 @@ export function exportTreasuryCsv(summary: TreasuryPlanSummary): void {
       'Calendrier',
       'Phase',
       'Tresorerie_Debut_Ar',
-      'Encaissements_Ar',
-      'Decaissements_Variables_Ar',
+      'Ventes_Riz_Ar',
+      'Ventes_Sous_Produits_Ar',
+      'Total_Entrees_Ar',
+      'Achats_Paddy_Ar',
+      'Usinage_et_Sacs_Ar',
+      'Logistique_Rotations_Ar',
       'Charges_Fixes_Ar',
       'Impots_IR_Ar',
+      'Total_Sorties_Ar',
       'Flux_Net_Mensuel_Ar',
       'BFR_Rotation_Ar',
       'Point_Bas_Intra_Mensuel_Ar',
       'Tresorerie_Fin_Mois_Ar',
+      'Jours_Couverture_BFR',
       'Niveau_Risque',
     ].join(sep),
   ];
@@ -320,14 +425,20 @@ export function exportTreasuryCsv(summary: TreasuryPlanSummary): void {
         row.calendarMonthName,
         row.phaseLabel,
         row.openingCashAr.toFixed(0),
+        row.riceSalesInflowAr.toFixed(0),
+        row.byproductSalesInflowAr.toFixed(0),
         row.inflowsAr.toFixed(0),
-        row.variableOutflowsAr.toFixed(0),
+        row.paddyPurchaseOutflowAr.toFixed(0),
+        row.millingAndBagsOutflowAr.toFixed(0),
+        row.rotationLogisticsOutflowAr.toFixed(0),
         row.fixedOutflowsAr.toFixed(0),
         row.taxOutflowsAr.toFixed(0),
+        row.totalOutflowsAr.toFixed(0),
         row.netMonthlyCashFlowAr.toFixed(0),
         row.bfrPerRotationAr.toFixed(0),
         row.intraMonthMinCashAr.toFixed(0),
         row.endingCashAr.toFixed(0),
+        row.bfrCoverageDays.toFixed(1),
         row.riskLevel.toUpperCase(),
       ].join(sep)
     );
@@ -338,7 +449,7 @@ export function exportTreasuryCsv(summary: TreasuryPlanSummary): void {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `plan_tresorerie_soudure_${new Date().toISOString().slice(0, 10)}.csv`;
+  link.download = `plan_tresorerie_annuel_M1_M12_${new Date().toISOString().slice(0, 10)}.csv`;
   link.click();
   URL.revokeObjectURL(url);
 }

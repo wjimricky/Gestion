@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { BarChart3, TrendingUp } from 'lucide-react';
+import { BarChart3, Download, TrendingUp } from 'lucide-react';
 import {
   Bar,
   CartesianGrid,
@@ -16,7 +16,7 @@ import { formatAriary, formatKg, formatPercent } from '../../utils/formatters';
 import { ChartExportButtons } from './ChartExportButtons';
 
 export const AnnualComparisonView: React.FC = () => {
-  const { model, unitDisplay } = useFinancial();
+  const { model, unitDisplay, exportFiveYearProjectionsToCsv } = useFinancial();
   const inM = unitDisplay === 'millions';
 
   const [scenarioMode, setScenarioMode] = useState<'realistic' | 'ambitious'>('realistic');
@@ -62,32 +62,44 @@ export const AnnualComparisonView: React.FC = () => {
           </p>
         </div>
 
-        <div
-          role="group"
-          aria-label="Scénario de projection 5 ans"
-          className="inline-flex items-center p-0.5 rounded-xl border border-zinc-200 dark:border-white/[0.1] bg-zinc-50 dark:bg-[#171627] self-start no-print"
-        >
+        <div className="flex flex-wrap items-center gap-2 self-start no-print">
+          <div
+            role="group"
+            aria-label="Scénario de projection 5 ans"
+            className="inline-flex items-center p-0.5 rounded-xl border border-zinc-200 dark:border-white/[0.1] bg-zinc-50 dark:bg-[#171627]"
+          >
+            <button
+              type="button"
+              onClick={() => setScenarioMode('realistic')}
+              className={`min-h-8 px-3 py-1 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+                scenarioMode === 'realistic'
+                  ? 'bg-indigo-600 text-white'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+              }`}
+            >
+              Scénario Réaliste
+            </button>
+            <button
+              type="button"
+              onClick={() => setScenarioMode('ambitious')}
+              className={`min-h-8 px-3 py-1 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
+                scenarioMode === 'ambitious'
+                  ? 'bg-indigo-600 text-white'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+              }`}
+            >
+              Scénario Ambitieux
+            </button>
+          </div>
+
           <button
             type="button"
-            onClick={() => setScenarioMode('realistic')}
-            className={`min-h-8 px-3 py-1 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
-              scenarioMode === 'realistic'
-                ? 'bg-indigo-600 text-white'
-                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
-            }`}
+            onClick={exportFiveYearProjectionsToCsv}
+            title="Exporter les projections financières quinquennales (A1–A5 et 60 mois) au format CSV"
+            className="min-h-9 px-3 py-1.5 rounded-xl border border-zinc-300 dark:border-white/[0.12] bg-white dark:bg-[#171627] hover:bg-zinc-100 dark:hover:bg-[#222038] text-xs font-semibold text-zinc-800 dark:text-zinc-200 inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
           >
-            Scénario Réaliste
-          </button>
-          <button
-            type="button"
-            onClick={() => setScenarioMode('ambitious')}
-            className={`min-h-8 px-3 py-1 rounded-lg text-xs font-semibold transition-colors whitespace-nowrap ${
-              scenarioMode === 'ambitious'
-                ? 'bg-indigo-600 text-white'
-                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
-            }`}
-          >
-            Scénario Ambitieux
+            <Download className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400 shrink-0" aria-hidden="true" />
+            <span>Exporter CSV (5 ans)</span>
           </button>
         </div>
       </div>

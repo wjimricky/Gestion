@@ -4,6 +4,7 @@ import { ConsecutiveNegativeTreasuryAlert } from '../utils/treasuryAlerts';
 import { formatAriary, formatMonths, formatPercent } from '../utils/formatters';
 
 export type EmailAlertMetricId =
+  | 'netMargin'
   | 'operatingMargin'
   | 'grossMargin'
   | 'van'
@@ -18,6 +19,11 @@ export interface EmailAlertMetricMeta {
 }
 
 export const EMAIL_ALERT_METRICS: EmailAlertMetricMeta[] = [
+  {
+    id: 'netMargin',
+    label: 'Marge nette après IR',
+    description: 'Déclenche lorsque le taux de marge nette après IR passe sous le seuil critique.',
+  },
   {
     id: 'operatingMargin',
     label: 'Marge opérationnelle',
@@ -101,7 +107,15 @@ const STORAGE_KEY_HISTORY = 'rizmadagascar_email_alert_history_v1';
 export const DEFAULT_EMAIL_ALERT_CONFIG: EmailAlertRuleConfig = {
   enabled: false,
   recipients: 'T.JimRicky@gmail.com',
-  watchedMetrics: ['operatingMargin', 'grossMargin', 'van', 'tri', 'payback', 'negativeTreasury'],
+  watchedMetrics: [
+    'netMargin',
+    'operatingMargin',
+    'grossMargin',
+    'van',
+    'tri',
+    'payback',
+    'negativeTreasury',
+  ],
   cooldownMinutes: 60,
   subjectPrefix: '[RizMadagascar · Alerte KPI]',
 };

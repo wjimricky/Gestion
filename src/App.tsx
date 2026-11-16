@@ -12,23 +12,27 @@ import { ProjectManagerModal } from './components/ui/ProjectManagerModal';
 import { ProjectComparatorModal } from './components/ui/ProjectComparatorModal';
 import { FinancialGlossaryModal } from './components/ui/FinancialGlossaryModal';
 import { GoogleSheetsExportModal } from './components/ui/GoogleSheetsExportModal';
+import { CustomPdfExportModal } from './components/ui/CustomPdfExportModal';
 import { OfflineIndicator } from './components/ui/OfflineIndicator';
 import { InteractiveTour, TOUR_STORAGE_KEY } from './components/ui/InteractiveTour';
 import { TooltipProvider } from './components/ui/Tooltip';
 import { formatAriary, formatMonths, formatPercent } from './utils/formatters';
-import { exportDashboardToPdf } from './utils/exportPdf';
+import { exportDashboardToPdf, PdfExportSectionsConfig } from './utils/exportPdf';
 import { exportModelToDocx } from './utils/exportDocx';
 import { DashboardTab } from './components/tabs/DashboardTab';
 import { HypothesesTab } from './components/tabs/HypothesesTab';
 import { PartnersEcosystemTab } from './components/tabs/PartnersEcosystemTab';
+import { ConcurrenceTab } from './components/tabs/ConcurrenceTab';
 import { ScenariosTab } from './components/tabs/ScenariosTab';
 import { SensibilityTab } from './components/tabs/SensibilityTab';
 import { BreakEvenTab } from './components/tabs/BreakEvenTab';
 import { PaybackTab } from './components/tabs/PaybackTab';
+import { TreasuryTab } from './components/tabs/TreasuryTab';
 import { ProjectionsTab } from './components/tabs/ProjectionsTab';
 import { VanTriTab } from './components/tabs/VanTriTab';
 import { MonteCarloTab } from './components/tabs/MonteCarloTab';
 import { MethodologyTab } from './components/tabs/MethodologyTab';
+import { PestelTab } from './components/tabs/PestelTab';
 import { SettingsTab } from './components/tabs/SettingsTab';
 
 function isTypingOrInteractiveTarget(target: EventTarget | null): boolean {
@@ -83,6 +87,7 @@ function MainApp() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
+  const [customPdfModalOpen, setCustomPdfModalOpen] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isExportingDocx, setIsExportingDocx] = useState(false);
 
@@ -142,16 +147,24 @@ function MainApp() {
     notify('success', 'Fichier JSON exporté.');
   }, [exportToJson, notify]);
 
-  const handleExportPdf = useCallback(async () => {
+  const handleExportPdf = useCallback(async (customSections?: PdfExportSectionsConfig) => {
     if (isExportingPdf) return;
     setIsExportingPdf(true);
     try {
-      // Ensure Dashboard Recharts SVGs are rendered in DOM before capture
-      if (currentTab !== 'dashboard') {
-        setCurrentTab('dashboard');
-        await new Promise((resolve) => window.setTimeout(resolve, 420));
-      } else {
-        await new Promise((resolve) => window.setTimeout(resolve, 60));
+      const sectionsArg =
+        customSections && typeof customSections.dashboard === 'boolean'
+          ? customSections
+          : undefined;
+      const shouldCaptureCharts = sectionsArg?.charts ?? true;
+
+      // Ensure Dashboard Recharts SVGs are rendered in DOM only when charts are included
+      if (shouldCaptureCharts) {
+        if (currentTab !== 'dashboard') {
+          setCurrentTab('dashboard');
+          await new Promise((resolve) => window.setTimeout(resolve, 420));
+        } else {
+          await new Promise((resolve) => window.setTimeout(resolve, 60));
+        }
       }
       const scenarioName =
         savedScenarios.find((s) => s.id === activeScenarioId)?.name || 'Scénario courant';
@@ -162,8 +175,14 @@ function MainApp() {
         unitDisplay,
         pestelAnalysis,
         dashboardNotes: dashboardReportNotes,
+        sections: sectionsArg,
       });
-      notify('success', 'Tableau de bord exporté en PDF (graphiques et synthèses inclus).');
+      notify(
+        'success',
+        sectionsArg
+          ? 'Rapport PDF personnalisé exporté avec les sections sélectionnées.'
+          : 'Tableau de bord exporté en PDF (graphiques et synthèses inclus).'
+      );
     } catch (err) {
       console.error('Erreur export PDF:', err);
       notify('error', 'Impossible de générer le PDF du tableau de bord.');
@@ -300,7 +319,8 @@ function MainApp() {
         onOpenScenarioManager={handleOpenScenarioManager}
         onOpenExcelImport={() => setExcelImportOpen(true)}
         onOpenProjectManager={() => setProjectManagerOpen(true)}
-        onExportPdf={handleExportPdf}
+        onExportPdf={() => void handleExportPdf()}
+        onOpenCustomPdfModal={() => setCustomPdfModalOpen(true)}
         isExportingPdf={isExportingPdf}
         onExportDocx={handleExportDocx}
         isExportingDocx={isExportingDocx}
@@ -388,7 +408,8 @@ function MainApp() {
           {currentTab === 'dashboard' && (
             <DashboardTab
               onNavigate={setCurrentTab}
-              onExportPdf={handleExportPdf}
+              onExportPdf={() => void handleExportPdf()}
+              onOpenCustomPdfModal={() => setCustomPdfModalOpen(true)}
               isExportingPdf={isExportingPdf}
               onExportDocx={handleExportDocx}
               isExportingDocx={isExportingDocx}
@@ -398,16 +419,19 @@ function MainApp() {
           )}
           {currentTab === 'hypotheses' && <HypothesesTab />}
           {currentTab === 'partenaires' && <PartnersEcosystemTab />}
+          {currentTab === 'concurrence' && <ConcurrenceTab />}
           {currentTab === 'scenarios' && (
             <ScenariosTab onOpenScenarioManager={() => handleOpenScenarioManager('list')} />
           )}
           {currentTab === 'sensibilite' && <SensibilityTab />}
           {currentTab === 'breakeven' && <BreakEvenTab />}
           {currentTab === 'payback' && <PaybackTab />}
+          {currentTab === 'tresorerie' && <TreasuryTab />}
           {currentTab === 'projections' && <ProjectionsTab />}
           {currentTab === 'vantri' && <VanTriTab />}
           {currentTab === 'montecarlo' && <MonteCarloTab />}
           {currentTab === 'methodologie' && <MethodologyTab />}
+          {currentTab === 'pestel' && <PestelTab />}
           {currentTab === 'parametres' && <SettingsTab />}
         </main>
       </div>
@@ -483,6 +507,19 @@ function MainApp() {
         onClose={() => setGoogleSheetsModalOpen(false)}
       />
 
+      {/* Custom PDF Export Section Selector Modal */}
+      <CustomPdfExportModal
+        open={customPdfModalOpen}
+        onClose={() => setCustomPdfModalOpen(false)}
+        projectName={activeProject.name}
+        scenarioName={
+          savedScenarios.find((s) => s.id === activeScenarioId)?.name || 'Scénario courant'
+        }
+        hasNotes={dashboardReportNotes.trim().length > 0}
+        isExporting={isExportingPdf}
+        onExport={(sections) => void handleExportPdf(sections)}
+      />
+
       {/* Command Palette Modal (Ctrl+K) */}
       <CommandPaletteModal
         open={commandPaletteOpen}
@@ -498,7 +535,8 @@ function MainApp() {
         isFullscreen={isFullscreen}
         onToggleFullscreen={handleToggleFullscreen}
         onExportExcel={exportToExcel}
-        onExportPdf={handleExportPdf}
+        onExportPdf={() => void handleExportPdf()}
+        onOpenCustomPdfModal={() => setCustomPdfModalOpen(true)}
         onExportDocx={handleExportDocx}
         onExportSeasonalCsv={exportSeasonalIncomeStatementToCsv}
         onExportCsv={exportProjectionsToCsv}

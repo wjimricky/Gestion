@@ -77,6 +77,7 @@ export const DEFAULT_ASSUMPTIONS: FinancialAssumptions = {
     minNpvAr: 0,
     minIrrRate: 0.12,
     maxPaybackMonths: 24,
+    minNetMarginRate: 0.08,
   },
   // Analyse d'impact climatique (conditions normales par défaut : zéro dérive)
   climateImpact: {

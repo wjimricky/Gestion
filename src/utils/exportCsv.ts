@@ -1,4 +1,7 @@
 import { FullFinancialModel, MonthlyCashFlow, ProjectionYear } from '../types/finance';
+import { calculateFullModel } from '../engine/calculator';
+import { applyScenarioDefinitionToAssumptions } from './scenarioHelpers';
+import { buildAnnualComparison5Y } from './annualComparison';
 
 function escapeCsvCell(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return '';
@@ -540,6 +543,70 @@ export function exportFiveYearRawCsv(
     m.cumulativeCashFlowAr,
   ]);
 
+  const buildComparativeSimBlock = (): (string | number)[][] => {
+    const pessModel = calculateFullModel(
+      applyScenarioDefinitionToAssumptions(
+        model.assumptions,
+        model.scenarios.pessimiste.definition
+      )
+    );
+    const optModel = calculateFullModel(
+      applyScenarioDefinitionToAssumptions(
+        model.assumptions,
+        model.scenarios.optimiste.definition
+      )
+    );
+
+    const pess5Y = buildAnnualComparison5Y(pessModel, 'realistic');
+    const real5Y = buildAnnualComparison5Y(model, 'realistic');
+    const opt5Y = buildAnnualComparison5Y(optModel, 'ambitious');
+
+    const simHeaders = [
+      'Scénario simulé',
+      'Année',
+      'Code Exercice',
+      'Volume Riz Vendu (kg)',
+      'Chiffre d affaires (Ar)',
+      'Coûts variables (Ar)',
+      'Marge brute (Ar)',
+      'Taux marge brute (%)',
+      'Charges fixes (Ar)',
+      'Résultat Opérationnel EBIT (Ar)',
+      'Marge opérationnelle (%)',
+      'Impôt IR (Ar)',
+      'Résultat net après IR (Ar)',
+      'Marge nette (%)',
+    ];
+
+    const toSimRows = (label: string, rows: typeof real5Y.rows) =>
+      rows.map((row) => [
+        label,
+        row.year,
+        row.shortLabel,
+        row.riceVolumeKg,
+        row.turnoverAr,
+        row.variableCostsAr,
+        row.grossProfitAr,
+        Number((row.grossMarginRate * 100).toFixed(2)),
+        row.fixedChargesAr,
+        row.operatingIncomeAr,
+        Number((row.operatingMarginRate * 100).toFixed(2)),
+        row.corporateTaxAr,
+        row.netResultAfterTaxAr,
+        Number((row.netMarginRate * 100).toFixed(2)),
+      ]);
+
+    return [
+      ['SIMULATION COMPARATIVE QUINQUENNALE PAR SCÉNARIO (A1–A5)'],
+      simHeaders,
+      ...toSimRows('Pessimiste (Stress)', pess5Y.rows),
+      ...toSimRows(`Réaliste (${scenarioName})`, real5Y.rows),
+      ...toSimRows('Optimiste (Croissance)', opt5Y.rows),
+    ];
+  };
+
+  const comparativeSimRows = buildComparativeSimBlock();
+
   const summaryRows: (string | number)[][] = [
     [],
     ['PARAMÈTRES BRUTS & SYNTHÈSE 5 ANS', scenarioName],
@@ -557,6 +624,8 @@ export function exportFiveYearRawCsv(
     ['PROJECTIONS ANNUELLES BRUTES SUR 5 ANS (A1–A5)'],
     annualHeaders,
     ...annualCsvRows,
+    [],
+    ...comparativeSimRows,
     [],
     ['FLUX DE TRÉSORERIE MENSUELS BRUTS SUR 5 ANS (MOIS 0 À 60)'],
     monthlyHeaders,

@@ -8,11 +8,15 @@ import {
   CalendarClock,
   ShieldCheck,
   AlertTriangle,
+  Wallet,
 } from 'lucide-react';
 import {
   Bar,
   BarChart,
   CartesianGrid,
+  ComposedChart,
+  Line,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip as RechartsTooltip,
   XAxis,
@@ -33,7 +37,8 @@ import { Tooltip } from './Tooltip';
 import { ChartExportButtons } from './ChartExportButtons';
 
 export const LoanRepaymentSection: React.FC = () => {
-  const { model, unitDisplay } = useFinancial();
+  const { model, unitDisplay, theme } = useFinancial();
+  const isDarkMode = theme === 'dark';
   const inM = unitDisplay === 'millions';
 
   const [params, setParams] = useState<AgriculturalLoanParams>(DEFAULT_LOAN_PARAMS);
@@ -73,6 +78,17 @@ export const LoanRepaymentSection: React.FC = () => {
     [summary.schedule]
   );
 
+  const cashFlowChartData = useMemo(
+    () =>
+      summary.cashFlowImpact36.map((row) => ({
+        label: row.label,
+        baseCumMAr: Number((row.baselineCumulativeCfAr / 1e6).toFixed(2)),
+        postLoanCumMAr: Number((row.postLoanCumulativeCfAr / 1e6).toFixed(2)),
+        debtServiceMAr: Number((-row.debtServiceAr / 1e6).toFixed(2)),
+      })),
+    [summary.cashFlowImpact36]
+  );
+
   const dscrValue = summary.dscrYear1;
   const dscrHealthy = dscrValue !== null && dscrValue >= 1.25;
   const dscrTight = dscrValue !== null && dscrValue >= 1 && dscrValue < 1.25;
@@ -84,9 +100,12 @@ export const LoanRepaymentSection: React.FC = () => {
       ? '/ trim.'
       : '/ an';
 
+  const gridStroke = isDarkMode ? 'rgba(255,255,255,0.08)' : '#e4e4e7';
+  const axisTickColor = isDarkMode ? '#a1a1aa' : '#52525b';
+
   return (
     <section
-      aria-label="Plan de remboursement bancaire agricole à Madagascar"
+      aria-label="Simulation de prêt bancaire et impact sur le flux de trésorerie disponible"
       className="p-4 sm:p-5 rounded-xl border border-zinc-200 dark:border-white/[0.08] bg-white dark:bg-zinc-900/70 space-y-5"
     >
       {/* Header */}
@@ -99,15 +118,15 @@ export const LoanRepaymentSection: React.FC = () => {
           <div>
             <div className="flex items-center gap-1.5">
               <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                12. Plan de Remboursement — Prêts Bancaires &amp; IMF Agricoles (Madagascar)
+                12. Simulation de Prêt Bancaire &amp; Impact sur le Cash Flow Disponible
               </h2>
               <Tooltip
-                label="Plan de Remboursement Agricole"
-                content="Simulez les annuités, le différé de campagne (soudure/stockage), les frais de dossier, le coût total des intérêts et la capacité de couverture de la dette (DSCR) pour des crédits bancaires ou IMF malgaches."
+                label="Simulation Prêt Bancaire & Cash Flow"
+                content="Calcule les annuités, les intérêts, le différé de campagne, l'économie d'impôt sur intérêts (IR) et simule l'impact exact du service de la dette sur le flux de trésorerie disponible (36 mois)."
               />
             </div>
             <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">
-              Calculez vos échéances et le coût financier des prêts de campagne (warrantage GCV), crédits matériel ou lignes BFR.
+              Évaluez les échéances bancaires/IMF, le coût total du crédit et la trajectoire du Cash Flow disponible avant et après dette.
             </p>
           </div>
         </div>
@@ -124,9 +143,23 @@ export const LoanRepaymentSection: React.FC = () => {
 
       {/* Presets */}
       <div className="space-y-2">
-        <div className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
-          Produits de financement agricoles types (Madagascar)
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+            Produits de financement agricoles types (Madagascar)
+          </div>
+          <label className="inline-flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={params.includeDisbursementInCashFlow ?? true}
+              onChange={(e) =>
+                updateParam('includeDisbursementInCashFlow', e.target.checked)
+              }
+              className="rounded border-zinc-300 dark:border-zinc-700 accent-indigo-600"
+            />
+            <span>Inclure le déblocage du capital emprunté en M1 dans le Cash Flow</span>
+          </label>
         </div>
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
           {MALAGASY_AG_LOAN_PRESETS.map((preset) => {
             const isSelected = params.presetId === preset.id;
@@ -228,7 +261,7 @@ export const LoanRepaymentSection: React.FC = () => {
         <FormField
           label="Différé d’amortissement (soudure)"
           unit="mois (intérêts seuls)"
-          tooltip="Période de grâce en début de prêt pendant laquelle seuls les intérêts sont réglés (idéal jusqu’à la revente en période de soudure)."
+          tooltip="Période de grâce en début de prêt pendant laquelle seuls les intérêts sont réglés."
         >
           {(props) => (
             <input
@@ -372,14 +405,17 @@ export const LoanRepaymentSection: React.FC = () => {
         </div>
 
         <div className="p-3.5 rounded-xl border border-zinc-200 dark:border-white/[0.08] bg-zinc-50/70 dark:bg-zinc-950/40 space-y-1">
-          <div className="text-[11px] font-medium text-zinc-600 dark:text-zinc-400">
-            Service de la dette (Année 1)
+          <div className="flex items-center justify-between text-[11px] font-medium text-zinc-600 dark:text-zinc-400">
+            <span>Impact Trésorerie &amp; Point bas</span>
+            <Wallet className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" aria-hidden="true" />
           </div>
           <div className="font-mono text-base font-bold tabular-nums text-zinc-900 dark:text-white">
-            {formatAriary(summary.annualizedDebtServiceYear1Ar, { inMillions: inM })}
+            {formatAriary(summary.postLoanMinCashAr, { inMillions: true })}
           </div>
           <div className="text-[11px] font-mono tabular-nums text-zinc-500">
-            Total remboursé : {formatAriary(summary.totalRepaidAr, { inMillions: true })}
+            Sans prêt : {formatAriary(summary.baselineMinCashAr, { inMillions: true })} · Δ M36 :{' '}
+            {summary.year3CumulativeCashDeltaAr >= 0 ? '+' : ''}
+            {formatAriary(summary.year3CumulativeCashDeltaAr, { inMillions: true })}
           </div>
         </div>
 
@@ -412,7 +448,7 @@ export const LoanRepaymentSection: React.FC = () => {
             {dscrValue !== null ? `${dscrValue.toFixed(2)}x` : 'N/A'}
           </div>
           <div className="text-[11px] font-mono tabular-nums text-zinc-600 dark:text-zinc-400">
-            Résultat net A1 après dette :{' '}
+            RN A1 après dette :{' '}
             <strong className="text-zinc-900 dark:text-zinc-100">
               {formatAriary(summary.netResultAfterDebtServiceYear1Ar, { inMillions: true })}
             </strong>
@@ -420,30 +456,90 @@ export const LoanRepaymentSection: React.FC = () => {
         </div>
       </div>
 
-      {/* Stacked Principal vs Interest Chart */}
-      <div
-        ref={chartCardRef}
-        className="p-4 rounded-xl border border-zinc-200 dark:border-white/[0.08] bg-zinc-50/50 dark:bg-zinc-950/35 space-y-3"
-      >
-        <div className="flex flex-wrap items-center justify-between gap-2">
+      {/* Dual Charts: (A) Cash Flow 36M Impact + (B) Principal vs Interest */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div className="p-4 rounded-xl border border-zinc-200 dark:border-white/[0.08] bg-zinc-50/50 dark:bg-zinc-950/35 space-y-3 min-w-0">
           <div>
             <h3 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
-              Ventilation Capital vs Intérêts par échéance (en milliers Ar)
+              Impact sur le Flux de Trésorerie Disponible Cumulé (36 mois, M Ar)
             </h3>
             <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-              {params.gracePeriodMonths > 0
-                ? `Inclut un différé initial de ${params.gracePeriodMonths} mois (intérêts seuls).`
-                : 'Amortissement immédiat dès la première échéance.'}
+              Comparaison entre la trésorerie sans emprunt et après déblocage, remboursements et économie d’IR.
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-3 text-[11px] text-zinc-600 dark:text-zinc-400">
-              <span className="inline-flex items-center gap-1">
-                <span className="w-2.5 h-2.5 rounded-xs bg-indigo-500" /> Capital amorti
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <span className="w-2.5 h-2.5 rounded-xs bg-amber-500" /> Intérêts
-              </span>
+          <div className="h-56 w-full min-w-0">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={cashFlowChartData} margin={{ top: 8, right: 10, left: -8, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 10, fill: axisTickColor }}
+                  interval={5}
+                  axisLine={{ stroke: gridStroke }}
+                />
+                <YAxis
+                  tick={{ fontSize: 10, fill: axisTickColor }}
+                  tickFormatter={(v) => `${v} M`}
+                  axisLine={{ stroke: gridStroke }}
+                  width={48}
+                />
+                <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="3 3" />
+                <RechartsTooltip
+                  contentStyle={{
+                    backgroundColor: isDarkMode ? '#141322' : '#ffffff',
+                    borderColor: isDarkMode ? 'rgba(255,255,255,0.12)' : '#e4e4e7',
+                    borderRadius: '10px',
+                    fontSize: '12px',
+                  }}
+                  formatter={(value: unknown, name: unknown) => [
+                    `${Number(value ?? 0).toFixed(2)} M Ar`,
+                    String(name ?? ''),
+                  ]}
+                />
+                <Bar
+                  dataKey="debtServiceMAr"
+                  name="Service dette mensuel"
+                  fill="#f43f5e"
+                  fillOpacity={0.35}
+                  maxBarSize={14}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="baseCumMAr"
+                  name="Cash Flow cumulé sans prêt"
+                  stroke="#94a3b8"
+                  strokeWidth={2}
+                  strokeDasharray="4 3"
+                  dot={false}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="postLoanCumMAr"
+                  name="Cash Flow cumulé avec prêt"
+                  stroke="#10b981"
+                  strokeWidth={2.5}
+                  dot={false}
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Stacked Principal vs Interest Chart */}
+        <div
+          ref={chartCardRef}
+          className="p-4 rounded-xl border border-zinc-200 dark:border-white/[0.08] bg-zinc-50/50 dark:bg-zinc-950/35 space-y-3 min-w-0"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                Ventilation Capital vs Intérêts par échéance (milliers Ar)
+              </h3>
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                {params.gracePeriodMonths > 0
+                  ? `Inclut un différé initial de ${params.gracePeriodMonths} mois (intérêts seuls).`
+                  : 'Amortissement immédiat dès la première échéance.'}
+              </p>
             </div>
             <ChartExportButtons
               targetRef={chartCardRef}
@@ -451,41 +547,91 @@ export const LoanRepaymentSection: React.FC = () => {
               chartTitle="Plan de remboursement agricole"
             />
           </div>
-        </div>
 
-        <div className="h-52 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData} margin={{ top: 8, right: 8, left: -4, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.16)" />
-              <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#94a3b8' }} interval="preserveStartEnd" />
-              <YAxis
-                tick={{ fontSize: 10, fill: '#94a3b8' }}
-                tickFormatter={(v) => `${Number(v).toLocaleString('fr-FR')} k`}
-                width={52}
-              />
-              <RechartsTooltip
-                contentStyle={{
-                  backgroundColor: '#0f172a',
-                  border: '1px solid rgba(255,255,255,0.12)',
-                  borderRadius: '10px',
-                  fontSize: '12px',
-                  color: '#f8fafc',
-                }}
-                formatter={(value, name) => [
-                  `${Number(value ?? 0).toLocaleString('fr-FR')} k Ar`,
-                  name === 'principal' ? 'Capital amorti' : 'Intérêts',
-                ]}
-              />
-              <Bar dataKey="principal" stackId="loan" fill="#6366f1" maxBarSize={26} />
-              <Bar
-                dataKey="interest"
-                stackId="loan"
-                fill="#f59e0b"
-                radius={[4, 4, 0, 0]}
-                maxBarSize={26}
-              />
-            </BarChart>
-          </ResponsiveContainer>
+          <div className="h-56 w-full min-w-0">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} margin={{ top: 8, right: 8, left: -4, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: axisTickColor }} interval="preserveStartEnd" />
+                <YAxis
+                  tick={{ fontSize: 10, fill: axisTickColor }}
+                  tickFormatter={(v) => `${Number(v).toLocaleString('fr-FR')} k`}
+                  width={52}
+                />
+                <RechartsTooltip
+                  contentStyle={{
+                    backgroundColor: isDarkMode ? '#141322' : '#ffffff',
+                    borderColor: isDarkMode ? 'rgba(255,255,255,0.12)' : '#e4e4e7',
+                    borderRadius: '10px',
+                    fontSize: '12px',
+                  }}
+                  formatter={(value, name) => [
+                    `${Number(value ?? 0).toLocaleString('fr-FR')} k Ar`,
+                    name === 'principal' ? 'Capital amorti' : 'Intérêts',
+                  ]}
+                />
+                <Bar dataKey="principal" stackId="loan" fill="#6366f1" maxBarSize={26} />
+                <Bar
+                  dataKey="interest"
+                  stackId="loan"
+                  fill="#f59e0b"
+                  radius={[4, 4, 0, 0]}
+                  maxBarSize={26}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+
+      {/* Annual Cash Flow Impact Summary Table (A1 - A3) */}
+      <div className="rounded-xl border border-zinc-200 dark:border-white/[0.08] overflow-hidden">
+        <div className="px-4 py-2.5 bg-zinc-50 dark:bg-zinc-950/50 border-b border-zinc-200 dark:border-white/[0.08] flex items-center justify-between text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+          <span>Impact Annuel du Prêt sur le Flux de Trésorerie Disponible (A1 – A3)</span>
+          <span className="font-mono text-[11px] font-normal text-zinc-500">
+            Bouclier fiscal IR : {formatPercent(model.assumptions.corporateTaxRate, 0)}
+          </span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs text-left border-collapse font-mono tabular-nums">
+            <thead className="bg-zinc-100/70 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 font-sans border-b border-zinc-200 dark:border-zinc-800">
+              <tr>
+                <th className="py-2 px-3 font-semibold">Exercice</th>
+                <th className="py-2 px-3 text-right font-semibold">Cash Flow Avant Prêt</th>
+                <th className="py-2 px-3 text-right font-semibold">Déblocage Net</th>
+                <th className="py-2 px-3 text-right font-semibold">Service Dette</th>
+                <th className="py-2 px-3 text-right font-semibold">Bouclier IR</th>
+                <th className="py-2 px-3 text-right font-semibold">Cash Flow Disponible</th>
+                <th className="py-2 px-3 text-right font-semibold">DSCR</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60">
+              {summary.annualCashFlowImpact.map((yr) => (
+                <tr key={yr.year} className="text-zinc-800 dark:text-zinc-200">
+                  <td className="py-2 px-3 font-sans font-semibold">{yr.label}</td>
+                  <td className="py-2 px-3 text-right">
+                    {formatAriary(yr.baselineCashFlowAr, { inMillions: inM })}
+                  </td>
+                  <td className="py-2 px-3 text-right text-indigo-700 dark:text-indigo-300">
+                    {yr.loanInflowNetAr >= 0 ? '+' : ''}
+                    {formatAriary(yr.loanInflowNetAr, { inMillions: inM })}
+                  </td>
+                  <td className="py-2 px-3 text-right text-rose-700 dark:text-rose-400">
+                    −{formatAriary(yr.totalDebtServiceAr, { inMillions: inM })}
+                  </td>
+                  <td className="py-2 px-3 text-right text-emerald-700 dark:text-emerald-400">
+                    +{formatAriary(yr.taxShieldAr, { inMillions: inM })}
+                  </td>
+                  <td className="py-2 px-3 text-right font-bold text-zinc-900 dark:text-white">
+                    {formatAriary(yr.postLoanFreeCashFlowAr, { inMillions: inM })}
+                  </td>
+                  <td className="py-2 px-3 text-right">
+                    {yr.dscr !== null ? `${yr.dscr.toFixed(2)}x` : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -568,3 +714,4 @@ export const LoanRepaymentSection: React.FC = () => {
     </section>
   );
 };
+

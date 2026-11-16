@@ -6,6 +6,7 @@ import {
   FileJson,
   FileSpreadsheet,
   FileText,
+  SlidersHorizontal,
   Table,
 } from 'lucide-react';
 import {
@@ -18,6 +19,7 @@ import {
 interface ExportMenuProps {
   onExportExcel: () => void;
   onExportPdf?: () => void;
+  onOpenCustomPdfModal?: () => void;
   isExportingPdf?: boolean;
   onExportDocx?: () => void;
   isExportingDocx?: boolean;
@@ -32,6 +34,7 @@ interface ExportMenuProps {
 export const ExportMenu: React.FC<ExportMenuProps> = ({
   onExportExcel,
   onExportPdf,
+  onOpenCustomPdfModal,
   isExportingPdf = false,
   onExportDocx,
   isExportingDocx = false,
@@ -246,6 +249,28 @@ export const ExportMenu: React.FC<ExportMenuProps> = ({
                   </div>
                   <div className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-snug mt-0.5">
                     Graphiques Recharts, KPI, CF A1–A3 et PESTEL
+                  </div>
+                </div>
+              </div>
+            </button>
+          )}
+
+          {onOpenCustomPdfModal && (
+            <button
+              type="button"
+              role="menuitem"
+              disabled={isExportingPdf}
+              onClick={() => runAction(onOpenCustomPdfModal)}
+              className={`${MENU_ITEM_BASE_CLASSES} px-3 py-2 ${MENU_ITEM_STATE_CLASSES.idle} disabled:opacity-60`}
+            >
+              <div className="flex items-start gap-2.5 min-w-0">
+                <SlidersHorizontal className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" aria-hidden="true" />
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                    Export PDF personnalisé…
+                  </div>
+                  <div className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-snug mt-0.5">
+                    Choix des sections : Tableau de bord, PESTEL, Sensibilité 2D
                   </div>
                 </div>
               </div>

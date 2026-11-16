@@ -2,12 +2,33 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { FullFinancialModel } from '../types/finance';
 import { PestelAnalysisData, PestelCategoryKey } from '../types/project';
+import { computeSensitivityMatrix } from '../engine/calculator';
 import { formatAriary, formatMonths, formatPercent } from './formatters';
 import {
   PESTEL_CATEGORIES_META,
   PESTEL_HORIZON_LABELS,
   PESTEL_IMPACT_LABELS,
 } from './pestelDefaults';
+
+export interface PdfExportSectionsConfig {
+  dashboard: boolean; // KPIs & Diagnostic sanitaire
+  charts: boolean; // Graphiques Recharts Cash-Flow & P&L
+  incomeStatement: boolean; // Compte de résultat A1
+  projections3Y: boolean; // Projections CF A1–A3
+  pestel: boolean; // Analyse PESTEL Madagascar
+  sensitivity: boolean; // Matrices de sensibilité 2D
+  notes: boolean; // Notes & commentaires du Tableau de bord
+}
+
+export const DEFAULT_PDF_SECTIONS: PdfExportSectionsConfig = {
+  dashboard: true,
+  charts: true,
+  incomeStatement: true,
+  projections3Y: true,
+  pestel: true,
+  sensitivity: true,
+  notes: true,
+};
 
 interface ExportPdfParams {
   model: FullFinancialModel;
@@ -16,6 +37,7 @@ interface ExportPdfParams {
   unitDisplay: 'standard' | 'millions';
   pestelAnalysis?: PestelAnalysisData;
   dashboardNotes?: string;
+  sections?: Partial<PdfExportSectionsConfig>;
 }
 
 type JsPdfWithAutoTable = jsPDF & {
@@ -31,6 +53,7 @@ function cleanPdfText(input: string): string {
     .replace(/[\u00A0\u202F\u2009]/g, ' ')
     .replace(/→/g, '->')
     .replace(/←/g, '<-')
+    .replace(/×/g, 'x')
     .replace(/—/g, '-')
     .replace(/–/g, '-')
     .replace(/₀/g, '0')
@@ -165,7 +188,13 @@ export async function exportDashboardToPdf({
   unitDisplay,
   pestelAnalysis,
   dashboardNotes,
+  sections,
 }: ExportPdfParams): Promise<{ chartsIncluded: number }> {
+  const cfg: PdfExportSectionsConfig = {
+    ...DEFAULT_PDF_SECTIONS,
+    ...(sections ?? {}),
+  };
+
   const inM = unitDisplay === 'millions';
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' }) as JsPdfWithAutoTable;
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -175,30 +204,44 @@ export async function exportDashboardToPdf({
   const fmtAr = (v: number, forceMillions = inM) =>
     cleanPdfText(formatAriary(v, { inMillions: forceMillions }));
 
-  // Capture live Recharts visuals before building PDF pages
-  const [cashFlowChartImg, profitLossChartImg] = await Promise.all([
-    captureChartAsPng('[data-pdf-chart="cashflow"]'),
-    captureChartAsPng('[data-pdf-chart="profitloss"]'),
-  ]);
+  // Capture live Recharts visuals only when charts section is enabled
+  const [cashFlowChartImg, profitLossChartImg] = cfg.charts
+    ? await Promise.all([
+        captureChartAsPng('[data-pdf-chart="cashflow"]'),
+        captureChartAsPng('[data-pdf-chart="profitloss"]'),
+      ])
+    : [null, null];
 
   let chartsIncluded = 0;
+  let sectionIdx = 1;
+  const nextSectionPrefix = () => `${sectionIdx++}.`;
+
+  // Selected modules summary for header
+  const activeLabels: string[] = [];
+  if (cfg.dashboard) activeLabels.push('Tableau de bord');
+  if (cfg.charts) activeLabels.push('Graphiques');
+  if (cfg.incomeStatement) activeLabels.push('Compte de resultat');
+  if (cfg.projections3Y) activeLabels.push('Projections');
+  if (cfg.pestel && pestelAnalysis) activeLabels.push('PESTEL');
+  if (cfg.sensitivity) activeLabels.push('Sensibilite 2D');
+  if (cfg.notes && (dashboardNotes || '').trim().length > 0) activeLabels.push('Notes');
 
   // 1. Header Banner
   doc.setFillColor(17, 16, 28); // #11101C
-  doc.rect(0, 0, pageWidth, 30, 'F');
+  doc.rect(0, 0, pageWidth, 32, 'F');
 
   doc.setTextColor(165, 180, 252);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
-  doc.text(cleanPdfText('RIZMADAGASCAR - SYNTHESE FINANCIERE INTEGRALE'), marginX, 9.5);
+  doc.text(cleanPdfText('RIZMADAGASCAR - RAPPORT FINANCIER PERSONNALISE'), marginX, 9);
 
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(14);
-  doc.text(cleanPdfText(`Rapport Tableau de Bord : ${projectName}`), marginX, 17.5);
+  doc.setFontSize(13.5);
+  doc.text(cleanPdfText(`Rapport : ${projectName}`), marginX, 16.5);
 
   doc.setTextColor(203, 213, 225);
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
+  doc.setFontSize(8);
   const dateStr = new Date().toLocaleDateString('fr-FR', {
     year: 'numeric',
     month: 'short',
@@ -211,143 +254,156 @@ export async function exportDashboardToPdf({
       }  |  Edite le ${dateStr}`
     ),
     marginX,
-    24.5
+    22.5
+  );
+  doc.setTextColor(148, 163, 184);
+  doc.setFontSize(7.4);
+  doc.text(
+    cleanPdfText(`Sections incluses : ${activeLabels.join(' · ') || 'Synthese'}`),
+    marginX,
+    28
   );
 
-  let y = 37;
+  let y = 39;
 
-  // 2. KPI Summary Table
-  doc.setTextColor(24, 24, 27);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10.5);
-  doc.text(cleanPdfText('1. Indicateurs Cles de Performance (Annee 1 & Triennal)'), marginX, y);
-  y += 3;
+  // SECTION: Tableau de bord (KPIs & Diagnostic)
+  if (cfg.dashboard) {
+    doc.setTextColor(24, 24, 27);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10.5);
+    doc.text(
+      cleanPdfText(`${nextSectionPrefix()} Indicateurs Cles de Performance (Annee 1 & Triennal)`),
+      marginX,
+      y
+    );
+    y += 3;
 
-  autoTable(doc, {
-    startY: y,
-    margin: { left: marginX, right: marginX },
-    head: [[cleanPdfText('Indicateur'), cleanPdfText('Valeur'), cleanPdfText('Precision / Repere')]],
-    body: [
-      [
-        cleanPdfText("Chiffre d'affaires Annuel (A1)"),
-        fmtAr(model.year1.totalTurnoverAr),
-        cleanPdfText(
-          `HS: ${fmtAr(model.hauteSaison.totalTurnoverAr)} | BS: ${fmtAr(
-            model.basseSaison.totalTurnoverAr
-          )}`
-        ),
+    autoTable(doc, {
+      startY: y,
+      margin: { left: marginX, right: marginX },
+      head: [[cleanPdfText('Indicateur'), cleanPdfText('Valeur'), cleanPdfText('Precision / Repere')]],
+      body: [
+        [
+          cleanPdfText("Chiffre d'affaires Annuel (A1)"),
+          fmtAr(model.year1.totalTurnoverAr),
+          cleanPdfText(
+            `HS: ${fmtAr(model.hauteSaison.totalTurnoverAr)} | BS: ${fmtAr(
+              model.basseSaison.totalTurnoverAr
+            )}`
+          ),
+        ],
+        [
+          cleanPdfText('Marge Brute Annuelle'),
+          fmtAr(model.year1.annualGrossProfitAr),
+          cleanPdfText(`Taux de marge brute : ${formatPercent(model.year1.grossMarginRate)}`),
+        ],
+        [
+          cleanPdfText('Benefice Net Apres IR'),
+          fmtAr(model.year1.netResultAfterTaxAr),
+          cleanPdfText(
+            `Marge nette : ${formatPercent(model.year1.netMarginAfterTaxRate)} (IR ${formatPercent(
+              model.assumptions.corporateTaxRate,
+              0
+            )})`
+          ),
+        ],
+        [
+          cleanPdfText('Fonds Initial a Lever (I0)'),
+          fmtAr(model.investment.fundsToRaiseAr),
+          cleanPdfText(`ROI Annee 1 : ${model.investment.roiRatio.toFixed(2)}x`),
+        ],
+        [
+          cleanPdfText('Seuil de Rentabilite (Break-Even)'),
+          fmtAr(model.breakEven.annualBreakEvenTurnoverAr),
+          cleanPdfText(
+            `Marge de securite : ${formatPercent(model.breakEven.safetyMarginRate)} (${Math.round(
+              model.breakEven.monthlyBreakEvenVolumeKg
+            ).toLocaleString('fr-FR')} kg/mois)`
+          ),
+        ],
+        [
+          cleanPdfText('Delai de Recuperation (Payback)'),
+          cleanPdfText(formatMonths(model.payback.paybackMonths)),
+          cleanPdfText(`Payback lineaire simple : ${formatMonths(model.payback.simplePaybackMonths)}`),
+        ],
+        [
+          cleanPdfText('VAN (3 ans) & TRI'),
+          fmtAr(model.npv.npvAr, true),
+          cleanPdfText(
+            `TRI : ${
+              Number.isFinite(model.irr.irrValue) ? formatPercent(model.irr.irrValue, 1) : 'N/A'
+            } | Decision : ${model.npv.decision}`
+          ),
+        ],
       ],
-      [
-        cleanPdfText('Marge Brute Annuelle'),
-        fmtAr(model.year1.annualGrossProfitAr),
-        cleanPdfText(`Taux de marge brute : ${formatPercent(model.year1.grossMarginRate)}`),
-      ],
-      [
-        cleanPdfText('Benefice Net Apres IR'),
-        fmtAr(model.year1.netResultAfterTaxAr),
-        cleanPdfText(
-          `Marge nette : ${formatPercent(model.year1.netMarginAfterTaxRate)} (IR ${formatPercent(
-            model.assumptions.corporateTaxRate,
-            0
-          )})`
-        ),
-      ],
-      [
-        cleanPdfText('Fonds Initial a Lever (I0)'),
-        fmtAr(model.investment.fundsToRaiseAr),
-        cleanPdfText(`ROI Annee 1 : ${model.investment.roiRatio.toFixed(2)}x`),
-      ],
-      [
-        cleanPdfText('Seuil de Rentabilite (Break-Even)'),
-        fmtAr(model.breakEven.annualBreakEvenTurnoverAr),
-        cleanPdfText(
-          `Marge de securite : ${formatPercent(model.breakEven.safetyMarginRate)} (${Math.round(
-            model.breakEven.monthlyBreakEvenVolumeKg
-          ).toLocaleString('fr-FR')} kg/mois)`
-        ),
-      ],
-      [
-        cleanPdfText('Delai de Recuperation (Payback)'),
-        cleanPdfText(formatMonths(model.payback.paybackMonths)),
-        cleanPdfText(`Payback lineaire simple : ${formatMonths(model.payback.simplePaybackMonths)}`),
-      ],
-      [
-        cleanPdfText('VAN (3 ans) & TRI'),
-        fmtAr(model.npv.npvAr, true),
-        cleanPdfText(
-          `TRI : ${
-            Number.isFinite(model.irr.irrValue) ? formatPercent(model.irr.irrValue, 1) : 'N/A'
-          } | Decision : ${model.npv.decision}`
-        ),
-      ],
-    ],
-    theme: 'grid',
-    styles: { fontSize: 8.2, cellPadding: 2.3, textColor: [24, 24, 27] },
-    headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255], fontStyle: 'bold' },
-    columnStyles: {
-      1: { halign: 'right', fontStyle: 'bold' },
-    },
-  });
+      theme: 'grid',
+      styles: { fontSize: 8.2, cellPadding: 2.3, textColor: [24, 24, 27] },
+      headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255], fontStyle: 'bold' },
+      columnStyles: {
+        1: { halign: 'right', fontStyle: 'bold' },
+      },
+    });
 
-  y = (doc.lastAutoTable?.finalY || y) + 8;
+    y = (doc.lastAutoTable?.finalY || y) + 8;
 
-  // 3. Diagnostic Sanitaire Table
-  y = ensureSpace(doc, y, 48);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10.5);
-  doc.text(cleanPdfText('2. Diagnostic Sanitaire & Viabilite du Projet'), marginX, y);
-  y += 3;
+    // Diagnostic Sanitaire Table
+    y = ensureSpace(doc, y, 48);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10.5);
+    doc.text(cleanPdfText(`${nextSectionPrefix()} Diagnostic Sanitaire & Viabilite du Projet`), marginX, y);
+    y += 3;
 
-  const netMarginPct = model.year1.netMarginAfterTaxRate * 100;
-  const paybackM = model.payback.paybackMonths;
-  const safetyPct = model.breakEven.safetyMarginRate * 100;
-  const bufferMonths =
-    model.year1.annualFixedChargesAr > 0
-      ? model.investment.cashBufferAr / (model.year1.annualFixedChargesAr / 12)
-      : 0;
+    const netMarginPct = model.year1.netMarginAfterTaxRate * 100;
+    const paybackM = model.payback.paybackMonths;
+    const safetyPct = model.breakEven.safetyMarginRate * 100;
+    const bufferMonths =
+      model.year1.annualFixedChargesAr > 0
+        ? model.investment.cashBufferAr / (model.year1.annualFixedChargesAr / 12)
+        : 0;
 
-  const badgeTxt = (ok: boolean, warn: boolean) =>
-    ok ? 'Sain (Vert)' : warn ? 'A surveiller (Orange)' : 'Critique (Rouge)';
+    const badgeTxt = (ok: boolean, warn: boolean) =>
+      ok ? 'Sain (Vert)' : warn ? 'A surveiller (Orange)' : 'Critique (Rouge)';
 
-  autoTable(doc, {
-    startY: y,
-    margin: { left: marginX, right: marginX },
-    head: [[cleanPdfText('Critere'), cleanPdfText('Valeur mesuree'), cleanPdfText('Seuil'), cleanPdfText('Statut')]],
-    body: [
-      [
-        cleanPdfText('Marge nette apres IR'),
-        cleanPdfText(`${netMarginPct.toFixed(1)} %`),
-        cleanPdfText('>= 10 % sain (< 5 % critique)'),
-        badgeTxt(netMarginPct >= 10, netMarginPct >= 5),
+    autoTable(doc, {
+      startY: y,
+      margin: { left: marginX, right: marginX },
+      head: [[cleanPdfText('Critere'), cleanPdfText('Valeur mesuree'), cleanPdfText('Seuil'), cleanPdfText('Statut')]],
+      body: [
+        [
+          cleanPdfText('Marge nette apres IR'),
+          cleanPdfText(`${netMarginPct.toFixed(1)} %`),
+          cleanPdfText('>= 10 % sain (< 5 % critique)'),
+          badgeTxt(netMarginPct >= 10, netMarginPct >= 5),
+        ],
+        [
+          cleanPdfText('Delai de recuperation (Payback)'),
+          cleanPdfText(Number.isFinite(paybackM) ? `${paybackM.toFixed(1)} mois` : 'Non atteint'),
+          cleanPdfText('<= 12 mois sain (> 24 m critique)'),
+          badgeTxt(Number.isFinite(paybackM) && paybackM <= 12, Number.isFinite(paybackM) && paybackM <= 24),
+        ],
+        [
+          cleanPdfText('Marge de securite & Liquidite'),
+          cleanPdfText(`${safetyPct.toFixed(1)} % | Reserve ${bufferMonths.toFixed(1)} m`),
+          cleanPdfText('Marge >= 25 % | Reserve >= 1.5 m'),
+          badgeTxt(safetyPct >= 25 && bufferMonths >= 1.5, safetyPct >= 12 && bufferMonths >= 0.75),
+        ],
+        [
+          cleanPdfText('Creation de valeur (VAN)'),
+          fmtAr(model.npv.npvAr, true),
+          cleanPdfText('VAN > 0 Ar'),
+          model.npv.npvAr > 0 ? 'Sain (Vert)' : 'Critique (Rouge)',
+        ],
       ],
-      [
-        cleanPdfText('Delai de recuperation (Payback)'),
-        cleanPdfText(Number.isFinite(paybackM) ? `${paybackM.toFixed(1)} mois` : 'Non atteint'),
-        cleanPdfText('<= 12 mois sain (> 24 m critique)'),
-        badgeTxt(Number.isFinite(paybackM) && paybackM <= 12, Number.isFinite(paybackM) && paybackM <= 24),
-      ],
-      [
-        cleanPdfText('Marge de securite & Liquidite'),
-        cleanPdfText(`${safetyPct.toFixed(1)} % | Reserve ${bufferMonths.toFixed(1)} m`),
-        cleanPdfText('Marge >= 25 % | Reserve >= 1.5 m'),
-        badgeTxt(safetyPct >= 25 && bufferMonths >= 1.5, safetyPct >= 12 && bufferMonths >= 0.75),
-      ],
-      [
-        cleanPdfText('Creation de valeur (VAN)'),
-        fmtAr(model.npv.npvAr, true),
-        cleanPdfText('VAN > 0 Ar'),
-        model.npv.npvAr > 0 ? 'Sain (Vert)' : 'Critique (Rouge)',
-      ],
-    ],
-    theme: 'striped',
-    styles: { fontSize: 8, cellPadding: 2.2 },
-    headStyles: { fillColor: [15, 118, 110], textColor: [255, 255, 255], fontStyle: 'bold' },
-  });
+      theme: 'striped',
+      styles: { fontSize: 8, cellPadding: 2.2 },
+      headStyles: { fillColor: [15, 118, 110], textColor: [255, 255, 255], fontStyle: 'bold' },
+    });
 
-  y = (doc.lastAutoTable?.finalY || y) + 8;
+    y = (doc.lastAutoTable?.finalY || y) + 8;
+  }
 
-  // 4. Recharts Charts Section
-  if (cashFlowChartImg || profitLossChartImg) {
+  // SECTION: Recharts Charts
+  if (cfg.charts && (cashFlowChartImg || profitLossChartImg)) {
     if (cashFlowChartImg) {
       const renderH = Math.min(78, (cashFlowChartImg.height / cashFlowChartImg.width) * usableWidth);
       y = ensureSpace(doc, y, renderH + 16);
@@ -355,7 +411,7 @@ export async function exportDashboardToPdf({
       doc.setFontSize(10.5);
       doc.setTextColor(24, 24, 27);
       doc.text(
-        cleanPdfText('3. Graphique Recharts : Flux de Tresorerie Cumules & Payback'),
+        cleanPdfText(`${nextSectionPrefix()} Graphique Recharts : Flux de Tresorerie Cumules & Payback`),
         marginX,
         y
       );
@@ -374,7 +430,7 @@ export async function exportDashboardToPdf({
       doc.setFontSize(10.5);
       doc.setTextColor(24, 24, 27);
       doc.text(
-        cleanPdfText('4. Graphique Recharts : Couts, Marge Brute & Resultat par Saison'),
+        cleanPdfText(`${nextSectionPrefix()} Graphique Recharts : Couts, Marge Brute & Resultat par Saison`),
         marginX,
         y
       );
@@ -387,174 +443,188 @@ export async function exportDashboardToPdf({
     }
   }
 
-  // 5. Complete Year 1 Income Statement Table
-  y = ensureSpace(doc, y, 60);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10.5);
-  doc.setTextColor(24, 24, 27);
-  doc.text(
-    cleanPdfText(`5. Compte de Resultat Previsionnel Annee 1 (${model.hauteSaison.months + model.basseSaison.months} mois)`),
-    marginX,
-    y
-  );
-  y += 3;
-
-  const hs = model.hauteSaison;
-  const bs = model.basseSaison;
-  const y1 = model.year1;
-  const safeRatio = (num: number, den: number) => (den > 0 ? num / den : 0);
-  const hsFixedShare = hs.seasonFixedChargesAr;
-  const bsFixedShare = bs.seasonFixedChargesAr;
-  const hsBeforeTax = hs.seasonNetResultBeforeTaxAr;
-  const bsBeforeTax = bs.seasonNetResultBeforeTaxAr;
-  const taxRate = model.assumptions.corporateTaxRate;
-  const hsTax = hsBeforeTax > 0 ? hsBeforeTax * taxRate : 0;
-  const bsTax = bsBeforeTax > 0 ? bsBeforeTax * taxRate : 0;
-
-  autoTable(doc, {
-    startY: y,
-    margin: { left: marginX, right: marginX },
-    head: [[
-      cleanPdfText('Poste comptable'),
-      cleanPdfText(`Haute Saison (${hs.months}m)`),
-      cleanPdfText(`Basse Saison (${bs.months}m)`),
-      cleanPdfText('Annee 1'),
-      cleanPdfText('% CA'),
-    ]],
-    body: [
-      [
-        cleanPdfText("Chiffre d'affaires total"),
-        fmtAr(hs.totalTurnoverAr),
-        fmtAr(bs.totalTurnoverAr),
-        fmtAr(y1.totalTurnoverAr),
-        cleanPdfText(formatPercent(1)),
-      ],
-      [
-        cleanPdfText("- Couts variables d'exploitation"),
-        fmtAr(hs.totalPurchaseAndOperatingCostsAr),
-        fmtAr(bs.totalPurchaseAndOperatingCostsAr),
-        fmtAr(y1.totalPurchaseAndOperatingCostsAr),
-        cleanPdfText(formatPercent(safeRatio(y1.totalPurchaseAndOperatingCostsAr, y1.totalTurnoverAr))),
-      ],
-      [
-        cleanPdfText('= Marge brute'),
-        fmtAr(hs.seasonGrossProfitAr),
-        fmtAr(bs.seasonGrossProfitAr),
-        fmtAr(y1.annualGrossProfitAr),
-        cleanPdfText(formatPercent(y1.grossMarginRate)),
-      ],
-      [
-        cleanPdfText('- Charges fixes (quote-part)'),
-        fmtAr(hsFixedShare),
-        fmtAr(bsFixedShare),
-        fmtAr(y1.annualFixedChargesAr),
-        cleanPdfText(formatPercent(safeRatio(y1.annualFixedChargesAr, y1.totalTurnoverAr))),
-      ],
-      [
-        cleanPdfText('= Resultat avant IR'),
-        fmtAr(hsBeforeTax),
-        fmtAr(bsBeforeTax),
-        fmtAr(y1.netResultBeforeTaxAr),
-        cleanPdfText(formatPercent(safeRatio(y1.netResultBeforeTaxAr, y1.totalTurnoverAr))),
-      ],
-      [
-        cleanPdfText(`- Impot sur le Revenu (${formatPercent(taxRate, 0)})`),
-        fmtAr(hsTax),
-        fmtAr(bsTax),
-        fmtAr(y1.corporateTaxAr),
-        cleanPdfText(formatPercent(safeRatio(y1.corporateTaxAr, y1.totalTurnoverAr))),
-      ],
-      [
-        cleanPdfText('= Benefice net apres IR'),
-        fmtAr(hsBeforeTax - hsTax),
-        fmtAr(bsBeforeTax - bsTax),
-        fmtAr(y1.netResultAfterTaxAr),
-        cleanPdfText(formatPercent(y1.netMarginAfterTaxRate)),
-      ],
-    ],
-    theme: 'grid',
-    styles: { fontSize: 8, cellPadding: 2.2 },
-    headStyles: { fillColor: [39, 39, 42], textColor: [255, 255, 255], fontStyle: 'bold' },
-    columnStyles: {
-      1: { halign: 'right' },
-      2: { halign: 'right' },
-      3: { halign: 'right', fontStyle: 'bold' },
-      4: { halign: 'right' },
-    },
-  });
-
-  y = (doc.lastAutoTable?.finalY || y) + 8;
-
-  // 6. Triennial Projections Table (CF A1-A3)
-  y = ensureSpace(doc, y, 42);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10.5);
-  doc.text(cleanPdfText('6. Projections de Flux de Tresorerie (CF A1 - A3)'), marginX, y);
-  y += 3;
-
-  autoTable(doc, {
-    startY: y,
-    margin: { left: marginX, right: marginX },
-    head: [[
-      cleanPdfText('Annee'),
-      cleanPdfText('Flux Net Standard'),
-      cleanPdfText('Flux Actualise (VAN)'),
-      cleanPdfText('Flux Net Ambitieux'),
-    ]],
-    body: [
-      [
-        cleanPdfText('T0 (Investissement I0)'),
-        fmtAr(-model.investment.fundsToRaiseAr),
-        fmtAr(-model.investment.fundsToRaiseAr),
-        fmtAr(-model.investment.fundsToRaiseAr),
-      ],
-      [
-        cleanPdfText('Annee 1 (CF A1)'),
-        fmtAr(model.projections.realistic[0]?.netResultAfterTaxAr ?? 0),
-        fmtAr(model.npv.pvYear1Ar),
-        fmtAr(model.projections.ambitious[0]?.netResultAfterTaxAr ?? 0),
-      ],
-      [
-        cleanPdfText('Annee 2 (CF A2)'),
-        fmtAr(model.projections.realistic[1]?.netResultAfterTaxAr ?? 0),
-        fmtAr(model.npv.pvYear2Ar),
-        fmtAr(model.projections.ambitious[1]?.netResultAfterTaxAr ?? 0),
-      ],
-      [
-        cleanPdfText('Annee 3 (CF A3)'),
-        fmtAr(model.projections.realistic[2]?.netResultAfterTaxAr ?? 0),
-        fmtAr(model.npv.pvYear3Ar),
-        fmtAr(model.projections.ambitious[2]?.netResultAfterTaxAr ?? 0),
-      ],
-    ],
-    theme: 'striped',
-    styles: { fontSize: 8, cellPadding: 2.2 },
-    headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255], fontStyle: 'bold' },
-    columnStyles: {
-      1: { halign: 'right' },
-      2: { halign: 'right' },
-      3: { halign: 'right' },
-    },
-  });
-
-  y = (doc.lastAutoTable?.finalY || y) + 8;
-
-  // 7. PESTEL Summary Table (if present)
-  if (pestelAnalysis) {
-    y = ensureSpace(doc, y, 52);
+  // SECTION: Complete Year 1 Income Statement Table
+  if (cfg.incomeStatement) {
+    y = ensureSpace(doc, y, 60);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10.5);
-    doc.text(cleanPdfText('7. Synthese Analyse PESTEL (Marche du Riz Madagascar)'), marginX, y);
+    doc.setTextColor(24, 24, 27);
+    doc.text(
+      cleanPdfText(
+        `${nextSectionPrefix()} Compte de Resultat Previsionnel Annee 1 (${model.hauteSaison.months + model.basseSaison.months} mois)`
+      ),
+      marginX,
+      y
+    );
+    y += 3;
+
+    const hs = model.hauteSaison;
+    const bs = model.basseSaison;
+    const y1 = model.year1;
+    const safeRatio = (num: number, den: number) => (den > 0 ? num / den : 0);
+    const hsFixedShare = hs.seasonFixedChargesAr;
+    const bsFixedShare = bs.seasonFixedChargesAr;
+    const hsBeforeTax = hs.seasonNetResultBeforeTaxAr;
+    const bsBeforeTax = bs.seasonNetResultBeforeTaxAr;
+    const taxRate = model.assumptions.corporateTaxRate;
+    const hsTax = hsBeforeTax > 0 ? hsBeforeTax * taxRate : 0;
+    const bsTax = bsBeforeTax > 0 ? bsBeforeTax * taxRate : 0;
+
+    autoTable(doc, {
+      startY: y,
+      margin: { left: marginX, right: marginX },
+      head: [[
+        cleanPdfText('Poste comptable'),
+        cleanPdfText(`Haute Saison (${hs.months}m)`),
+        cleanPdfText(`Basse Saison (${bs.months}m)`),
+        cleanPdfText('Annee 1'),
+        cleanPdfText('% CA'),
+      ]],
+      body: [
+        [
+          cleanPdfText("Chiffre d'affaires total"),
+          fmtAr(hs.totalTurnoverAr),
+          fmtAr(bs.totalTurnoverAr),
+          fmtAr(y1.totalTurnoverAr),
+          cleanPdfText(formatPercent(1)),
+        ],
+        [
+          cleanPdfText("- Couts variables d'exploitation"),
+          fmtAr(hs.totalPurchaseAndOperatingCostsAr),
+          fmtAr(bs.totalPurchaseAndOperatingCostsAr),
+          fmtAr(y1.totalPurchaseAndOperatingCostsAr),
+          cleanPdfText(formatPercent(safeRatio(y1.totalPurchaseAndOperatingCostsAr, y1.totalTurnoverAr))),
+        ],
+        [
+          cleanPdfText('= Marge brute'),
+          fmtAr(hs.seasonGrossProfitAr),
+          fmtAr(bs.seasonGrossProfitAr),
+          fmtAr(y1.annualGrossProfitAr),
+          cleanPdfText(formatPercent(y1.grossMarginRate)),
+        ],
+        [
+          cleanPdfText('- Charges fixes (quote-part)'),
+          fmtAr(hsFixedShare),
+          fmtAr(bsFixedShare),
+          fmtAr(y1.annualFixedChargesAr),
+          cleanPdfText(formatPercent(safeRatio(y1.annualFixedChargesAr, y1.totalTurnoverAr))),
+        ],
+        [
+          cleanPdfText('= Resultat avant IR'),
+          fmtAr(hsBeforeTax),
+          fmtAr(bsBeforeTax),
+          fmtAr(y1.netResultBeforeTaxAr),
+          cleanPdfText(formatPercent(safeRatio(y1.netResultBeforeTaxAr, y1.totalTurnoverAr))),
+        ],
+        [
+          cleanPdfText(`- Impot sur le Revenu (${formatPercent(taxRate, 0)})`),
+          fmtAr(hsTax),
+          fmtAr(bsTax),
+          fmtAr(y1.corporateTaxAr),
+          cleanPdfText(formatPercent(safeRatio(y1.corporateTaxAr, y1.totalTurnoverAr))),
+        ],
+        [
+          cleanPdfText('= Benefice net apres IR'),
+          fmtAr(hsBeforeTax - hsTax),
+          fmtAr(bsBeforeTax - bsTax),
+          fmtAr(y1.netResultAfterTaxAr),
+          cleanPdfText(formatPercent(y1.netMarginAfterTaxRate)),
+        ],
+      ],
+      theme: 'grid',
+      styles: { fontSize: 8, cellPadding: 2.2 },
+      headStyles: { fillColor: [39, 39, 42], textColor: [255, 255, 255], fontStyle: 'bold' },
+      columnStyles: {
+        1: { halign: 'right' },
+        2: { halign: 'right' },
+        3: { halign: 'right', fontStyle: 'bold' },
+        4: { halign: 'right' },
+      },
+    });
+
+    y = (doc.lastAutoTable?.finalY || y) + 8;
+  }
+
+  // SECTION: Triennial Projections Table (CF A1-A3)
+  if (cfg.projections3Y) {
+    y = ensureSpace(doc, y, 42);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10.5);
+    doc.setTextColor(24, 24, 27);
+    doc.text(cleanPdfText(`${nextSectionPrefix()} Projections de Flux de Tresorerie (CF A1 - A3)`), marginX, y);
+    y += 3;
+
+    autoTable(doc, {
+      startY: y,
+      margin: { left: marginX, right: marginX },
+      head: [[
+        cleanPdfText('Annee'),
+        cleanPdfText('Flux Net Standard'),
+        cleanPdfText('Flux Actualise (VAN)'),
+        cleanPdfText('Flux Net Ambitieux'),
+      ]],
+      body: [
+        [
+          cleanPdfText('T0 (Investissement I0)'),
+          fmtAr(-model.investment.fundsToRaiseAr),
+          fmtAr(-model.investment.fundsToRaiseAr),
+          fmtAr(-model.investment.fundsToRaiseAr),
+        ],
+        [
+          cleanPdfText('Annee 1 (CF A1)'),
+          fmtAr(model.projections.realistic[0]?.netResultAfterTaxAr ?? 0),
+          fmtAr(model.npv.pvYear1Ar),
+          fmtAr(model.projections.ambitious[0]?.netResultAfterTaxAr ?? 0),
+        ],
+        [
+          cleanPdfText('Annee 2 (CF A2)'),
+          fmtAr(model.projections.realistic[1]?.netResultAfterTaxAr ?? 0),
+          fmtAr(model.npv.pvYear2Ar),
+          fmtAr(model.projections.ambitious[1]?.netResultAfterTaxAr ?? 0),
+        ],
+        [
+          cleanPdfText('Annee 3 (CF A3)'),
+          fmtAr(model.projections.realistic[2]?.netResultAfterTaxAr ?? 0),
+          fmtAr(model.npv.pvYear3Ar),
+          fmtAr(model.projections.ambitious[2]?.netResultAfterTaxAr ?? 0),
+        ],
+      ],
+      theme: 'striped',
+      styles: { fontSize: 8, cellPadding: 2.2 },
+      headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255], fontStyle: 'bold' },
+      columnStyles: {
+        1: { halign: 'right' },
+        2: { halign: 'right' },
+        3: { halign: 'right' },
+      },
+    });
+
+    y = (doc.lastAutoTable?.finalY || y) + 8;
+  }
+
+  // SECTION: PESTEL Summary Table
+  if (cfg.pestel && pestelAnalysis) {
+    y = ensureSpace(doc, y, 56);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10.5);
+    doc.setTextColor(24, 24, 27);
+    doc.text(
+      cleanPdfText(`${nextSectionPrefix()} Synthese Analyse PESTEL (Marche du Riz Madagascar)`),
+      marginX,
+      y
+    );
     y += 3;
 
     const pestelRows = PESTEL_CATEGORIES_META.map((meta) => {
       const entry = pestelAnalysis[meta.key as PestelCategoryKey];
       const factorsText = entry.keyFactors.length > 0 ? entry.keyFactors.join(', ') : '-';
       const detail = entry.notes ? `${factorsText} | ${entry.notes}` : factorsText;
+      const oppScore = entry.impact === 'opportunite' ? entry.severity : 0;
+      const riskScore = entry.impact === 'menace' ? entry.severity : 0;
       return [
         cleanPdfText(`${meta.letter} - ${meta.title}`),
         cleanPdfText(PESTEL_IMPACT_LABELS[entry.impact]),
-        cleanPdfText(`${entry.severity}/5`),
+        cleanPdfText(`R:${riskScore}/5 | O:${oppScore}/5`),
         cleanPdfText(PESTEL_HORIZON_LABELS[entry.horizon]),
         cleanPdfText(detail.slice(0, 170)),
       ];
@@ -566,7 +636,7 @@ export async function exportDashboardToPdf({
       head: [[
         cleanPdfText('Pilier'),
         cleanPdfText('Impact'),
-        cleanPdfText('Criticite'),
+        cleanPdfText('Risque / Opp.'),
         cleanPdfText('Horizon'),
         cleanPdfText('Facteurs & Observations'),
       ]],
@@ -576,25 +646,156 @@ export async function exportDashboardToPdf({
       headStyles: { fillColor: [24, 24, 27], textColor: [255, 255, 255], fontStyle: 'bold' },
       columnStyles: {
         0: { cellWidth: 28, fontStyle: 'bold' },
-        1: { cellWidth: 24 },
-        2: { cellWidth: 16, halign: 'center' },
-        3: { cellWidth: 28 },
+        1: { cellWidth: 22 },
+        2: { cellWidth: 22, halign: 'center' },
+        3: { cellWidth: 26 },
         4: { cellWidth: 'auto' },
       },
     });
     y = (doc.lastAutoTable?.finalY || y) + 8;
   }
 
-  // 8. Editable Dashboard Text Notes (if non-empty)
+  // SECTION: 2D Sensitivity Analysis Matrices
+  if (cfg.sensitivity) {
+    const priceMatrix = computeSensitivityMatrix(model.assumptions, 'prix_vente_vs_prix_paddy');
+    const yieldMatrix = computeSensitivityMatrix(model.assumptions, 'rendement_vs_rotations');
+
+    y = ensureSpace(doc, y, 64);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10.5);
+    doc.setTextColor(24, 24, 27);
+    doc.text(
+      cleanPdfText(
+        `${nextSectionPrefix()} Analyse de Sensibilite 2D (Resultat Net Avant IR Annee 1, en M Ar)`
+      ),
+      marginX,
+      y
+    );
+    y += 4;
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.2);
+    doc.setTextColor(82, 82, 91);
+    doc.text(
+      cleanPdfText('Matrice A : Variation prix de vente du riz (lignes) x Variation prix achat paddy (colonnes)'),
+      marginX,
+      y
+    );
+    y += 2.5;
+
+    const priceHead = [
+      cleanPdfText('Prix vente \\ Prix paddy'),
+      ...priceMatrix.variableX.values.map((xv) =>
+        cleanPdfText(`${xv > 0 ? '+' : ''}${Math.round(xv * 100)} %`)
+      ),
+    ];
+    const priceBody = priceMatrix.variableY.values.map((yv, rIdx) => [
+      cleanPdfText(`${yv > 0 ? '+' : ''}${Math.round(yv * 100)} %`),
+      ...priceMatrix.matrix[rIdx].map((val) =>
+        cleanPdfText(`${(val / 1e6).toFixed(1)} M`)
+      ),
+    ]);
+
+    autoTable(doc, {
+      startY: y,
+      margin: { left: marginX, right: marginX },
+      head: [priceHead],
+      body: priceBody,
+      theme: 'grid',
+      styles: { fontSize: 7.8, cellPadding: 2, halign: 'right' },
+      headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'right' },
+      columnStyles: {
+        0: { halign: 'left', fontStyle: 'bold', fillColor: [244, 244, 245] },
+      },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.column.index > 0) {
+          const val = priceMatrix.matrix[data.row.index]?.[data.column.index - 1] ?? 0;
+          const isBase =
+            Math.abs(priceMatrix.variableY.values[data.row.index]) < 1e-6 &&
+            Math.abs(priceMatrix.variableX.values[data.column.index - 1]) < 1e-6;
+          if (isBase) {
+            data.cell.styles.fillColor = [224, 231, 255];
+            data.cell.styles.textColor = [49, 46, 129];
+            data.cell.styles.fontStyle = 'bold';
+          } else if (val < 0) {
+            data.cell.styles.fillColor = [254, 226, 226];
+            data.cell.styles.textColor = [153, 27, 27];
+          } else if (val >= 80_000_000) {
+            data.cell.styles.fillColor = [209, 250, 229];
+            data.cell.styles.textColor = [6, 95, 70];
+          }
+        }
+      },
+    });
+
+    y = (doc.lastAutoTable?.finalY || y) + 6;
+    y = ensureSpace(doc, y, 56);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.2);
+    doc.setTextColor(82, 82, 91);
+    doc.text(
+      cleanPdfText('Matrice B : Rendement usinage paddy->riz (lignes) x Cadence rotations/mois (colonnes)'),
+      marginX,
+      y
+    );
+    y += 2.5;
+
+    const yieldHead = [
+      cleanPdfText('Rendement \\ Rotations'),
+      ...yieldMatrix.variableX.values.map((xv) => cleanPdfText(`${xv.toFixed(1)} rot/m`)),
+    ];
+    const yieldBody = yieldMatrix.variableY.values.map((yv, rIdx) => [
+      cleanPdfText(`${(yv * 100).toFixed(1)} %`),
+      ...yieldMatrix.matrix[rIdx].map((val) =>
+        cleanPdfText(`${(val / 1e6).toFixed(1)} M`)
+      ),
+    ]);
+
+    autoTable(doc, {
+      startY: y,
+      margin: { left: marginX, right: marginX },
+      head: [yieldHead],
+      body: yieldBody,
+      theme: 'grid',
+      styles: { fontSize: 7.8, cellPadding: 2, halign: 'right' },
+      headStyles: { fillColor: [15, 118, 110], textColor: [255, 255, 255], fontStyle: 'bold', halign: 'right' },
+      columnStyles: {
+        0: { halign: 'left', fontStyle: 'bold', fillColor: [244, 244, 245] },
+      },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.column.index > 0) {
+          const val = yieldMatrix.matrix[data.row.index]?.[data.column.index - 1] ?? 0;
+          const isBase =
+            Math.abs(yieldMatrix.variableY.values[data.row.index] - yieldMatrix.currentYValue) < 0.005 &&
+            Math.abs(yieldMatrix.variableX.values[data.column.index - 1] - yieldMatrix.currentXValue) < 0.05;
+          if (isBase) {
+            data.cell.styles.fillColor = [224, 231, 255];
+            data.cell.styles.textColor = [49, 46, 129];
+            data.cell.styles.fontStyle = 'bold';
+          } else if (val < 0) {
+            data.cell.styles.fillColor = [254, 226, 226];
+            data.cell.styles.textColor = [153, 27, 27];
+          } else if (val >= 80_000_000) {
+            data.cell.styles.fillColor = [209, 250, 229];
+            data.cell.styles.textColor = [6, 95, 70];
+          }
+        }
+      },
+    });
+
+    y = (doc.lastAutoTable?.finalY || y) + 8;
+  }
+
+  // SECTION: Editable Dashboard Text Notes (if selected & non-empty)
   const trimmedNotes = (dashboardNotes || '').trim();
-  if (trimmedNotes.length > 0) {
-    const notesSectionNumber = pestelAnalysis ? 8 : 7;
+  if (cfg.notes && trimmedNotes.length > 0) {
     y = ensureSpace(doc, y, 28);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10.5);
     doc.setTextColor(24, 24, 27);
     doc.text(
-      cleanPdfText(`${notesSectionNumber}. Notes & Commentaires d'Analyse (Tableau de bord)`),
+      cleanPdfText(`${nextSectionPrefix()} Notes & Commentaires d'Analyse (Tableau de bord)`),
       marginX,
       y
     );
@@ -671,6 +872,6 @@ export async function exportDashboardToPdf({
     .replace(/^_+|_+$/g, '')
     .slice(0, 40);
 
-  doc.save(`Tableau_de_Bord_${safeSlug || 'RizMadagascar'}_${new Date().toISOString().slice(0, 10)}.pdf`);
+  doc.save(`Rapport_RizMadagascar_${safeSlug || 'Projet'}_${new Date().toISOString().slice(0, 10)}.pdf`);
   return { chartsIncluded };
 }

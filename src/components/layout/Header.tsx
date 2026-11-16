@@ -18,6 +18,7 @@ import {
   FolderKanban,
   FileUp,
   Settings,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { PWAInstallButton } from '../ui/PWAInstallButton';
 import { ThemeToggle } from '../ui/ThemeToggle';
@@ -29,6 +30,7 @@ interface HeaderProps {
   onOpenExcelImport: () => void;
   onOpenProjectManager: () => void;
   onExportPdf: () => void;
+  onOpenCustomPdfModal?: () => void;
   isExportingPdf?: boolean;
   onExportDocx?: () => void;
   isExportingDocx?: boolean;
@@ -45,6 +47,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenExcelImport,
   onOpenProjectManager,
   onExportPdf,
+  onOpenCustomPdfModal,
   isExportingPdf = false,
   onExportDocx,
   isExportingDocx = false,
@@ -298,7 +301,7 @@ export const Header: React.FC<HeaderProps> = ({
             {/* Export PDF complet du tableau de bord */}
             <button
               type="button"
-              onClick={onExportPdf}
+              onClick={() => onExportPdf()}
               disabled={isExportingPdf}
               title="Exporter l’intégralité du tableau de bord, graphiques et synthèses en PDF"
               aria-label="Exporter le tableau de bord complet en PDF"
@@ -307,6 +310,20 @@ export const Header: React.FC<HeaderProps> = ({
               <FileDown className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" aria-hidden="true" />
               <span className="hidden md:inline">{isExportingPdf ? 'PDF…' : 'PDF'}</span>
             </button>
+
+            {onOpenCustomPdfModal && (
+              <button
+                type="button"
+                onClick={onOpenCustomPdfModal}
+                disabled={isExportingPdf}
+                title="Choisir les sections à exporter en PDF (Tableau de bord, PESTEL, Sensibilité…)"
+                aria-label="Export PDF personnalisé"
+                className="hidden lg:inline-flex min-h-10 px-2.5 items-center justify-center gap-1.5 rounded-xl border border-zinc-300 dark:border-white/[0.1] bg-zinc-50 dark:bg-[#141323] text-xs font-semibold text-zinc-800 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-[#1D1B31] transition-colors whitespace-nowrap disabled:opacity-60 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/70"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" aria-hidden="true" />
+                <span className="hidden xl:inline">PDF perso.</span>
+              </button>
+            )}
 
             {/* Imprimer le rapport */}
             <button
@@ -325,6 +342,7 @@ export const Header: React.FC<HeaderProps> = ({
               <ExportMenu
                 onExportExcel={exportToExcel}
                 onExportPdf={onExportPdf}
+                onOpenCustomPdfModal={onOpenCustomPdfModal}
                 isExportingPdf={isExportingPdf}
                 onExportDocx={onExportDocx}
                 isExportingDocx={isExportingDocx}

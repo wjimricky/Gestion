@@ -50,12 +50,22 @@ export interface LogisticsAssumptions {
   fuelPriceArPerLiter: number;
   fuelConsumptionLPer100Km: number;
   truckTollAndWearArPerKm: number;
+  // Segment 2: Distribution Centre de Transformation -> Marchés Urbains
+  includeUrbanDistribution?: boolean;
+  distanceToUrbanMarketKmHS?: number;
+  distanceToUrbanMarketKmBS?: number;
+  urbanRoadConditionHS?: RoadCondition;
+  urbanRoadConditionBS?: RoadCondition;
+  urbanFreightArPerTonKm?: number;
+  urbanHandlingAndTollArPerRot?: number;
+  corridorPresetId?: string;
 }
 
 export interface KpiAlertThresholds {
   minNpvAr: number;
   minIrrRate: number; // decimal ratio, e.g. 0.12 = 12%
   maxPaybackMonths: number;
+  minNetMarginRate?: number; // decimal ratio, e.g. 0.08 = 8% (Résultat net après IR / CA)
   minOperatingMarginRate?: number; // decimal ratio, e.g. 0.10 = 10% (Résultat opérationnel avant IR / CA)
   minGrossMarginRate?: number; // decimal ratio, e.g. 0.20 = 20%
 }
@@ -66,6 +76,23 @@ export type ClimateHazardType =
   | 'secheresse_severe'
   | 'inondation_moderee'
   | 'cyclone_inondation';
+
+export type ClimateCoefficientCategory =
+  | 'cyclone'
+  | 'secheresse'
+  | 'inondation'
+  | 'autre';
+
+export interface ClimateLossCoefficient {
+  id: string;
+  label: string;
+  category: ClimateCoefficientCategory;
+  seasonScope: 'both' | 'hauteSaison' | 'basseSaison';
+  fieldLossPercent: number; // positive loss ratio e.g. 0.25 = -25% field yield
+  millingLossPoints: number; // positive points loss e.g. 0.02 = -2.0 pts milling yield
+  probabilityPercent: number; // 0..100 occurrence probability for expected-loss mode
+  active: boolean;
+}
 
 export interface ClimateImpactAssumptions {
   enabled: boolean;
@@ -79,6 +106,9 @@ export interface ClimateImpactAssumptions {
   baselinePaddyKgBS: number;
   baselineMillingYieldHS: number;
   baselineMillingYieldBS: number;
+  useCustomCoefficients?: boolean;
+  coefficientAggregationMode?: 'cumulative' | 'expected_probability';
+  customCoefficients?: ClimateLossCoefficient[];
 }
 
 export type FxCurrencyReference = 'EUR' | 'USD' | 'mixte';
@@ -107,6 +137,23 @@ export interface StorageOptimizationAssumptions {
   storageMethod: StorageMethodType;
   affectedSeason: 'both' | 'hauteSaison' | 'basseSaison';
   storageCapacityKg?: number; // warehouse capacity in kg (e.g. 40000 = 40T)
+}
+
+export interface StockManagementAssumptions {
+  enabled: boolean;
+  syncCostsToModel: boolean;
+  paddyHoldingDaysHS: number;
+  paddyHoldingDaysBS: number;
+  paddySafetyStockDays: number;
+  paddyMaxShelfLifeDays: number;
+  paddyStorageCostArPerTonMonth: number;
+  milledRiceHoldingDaysHS: number;
+  milledRiceHoldingDaysBS: number;
+  milledRiceSafetyStockDays: number;
+  milledRiceMaxShelfLifeDays: number;
+  milledRiceStorageCostArPerTonMonth: number;
+  workingCapitalFinancingRateAnnual: number; // e.g. 0.18 = 18%/year
+  targetHoldingReductionPct: number; // e.g. 25% optimization lever
 }
 
 export interface CooperativePartner {
@@ -207,6 +254,33 @@ export interface MarketComparisonAssumptions {
   positioningStrategy: MarketPositioningStrategy;
 }
 
+export type LocalCompetitorActorType =
+  | 'rizerie_industrielle'
+  | 'collecteur_usinier'
+  | 'cooperative'
+  | 'importateur_urbain'
+  | 'negociant_local';
+
+export interface LocalCompetitorActor {
+  id: string;
+  name: string;
+  actorType: LocalCompetitorActorType;
+  region: string;
+  paddySourcingCostArPerKgRice: number;
+  millingAndPackagingCostArPerKg: number;
+  logisticsAndOverheadArPerKg: number;
+  sellingPriceArPerKg: number;
+  marketSharePct: number;
+  millingYieldPct: number;
+  strengthTag: string;
+  active: boolean;
+}
+
+export interface CompetitorBenchmarkAssumptions {
+  ourTargetSharePct: number;
+  actors: LocalCompetitorActor[];
+}
+
 export type MaintenanceEquipmentCategory =
   | 'decortiqueuse'
   | 'polisseur_blanchiment'
@@ -256,6 +330,53 @@ export interface VatAssumptions {
   capexVatRecoverable: boolean;
 }
 
+export type CommunalTaxPresetId =
+  | 'custom'
+  | 'alaotra_type1'
+  | 'marovoay_irri'
+  | 'hauts_plateaux';
+
+export interface CommunalTaxesAssumptions {
+  enabled: boolean;
+  applyToModel: boolean;
+  presetId: CommunalTaxPresetId;
+  communeName: string;
+  ristourneArPerKgPaddy: number; // Ristourne communale par kg de paddy collecté
+  marketFeePerRotationAr: number; // Droit de marché, laissez-passer & pesage par rotation
+  cultivatedLandHa: number; // Surface foncière agricole (ha)
+  landRoyaltyArPerHaYear: number; // Redevance foncière / AUE périmètre irrigué (Ar/ha/an)
+  ifpbAndPatentMonthlyAr: number; // IFPB & Patente communale mensualisée (Ar/mois)
+}
+
+export type FixedAssetCategory =
+  | 'unite_decorticage'
+  | 'materiel_agricole'
+  | 'transport_manutention'
+  | 'energie_infra';
+
+export type DepreciationMethod = 'lineaire' | 'degressif';
+
+export interface FixedAssetItem {
+  id: string;
+  name: string;
+  category: FixedAssetCategory;
+  acquisitionValueAr: number;
+  residualValueAr: number;
+  usefulLifeYears: number;
+  method: DepreciationMethod;
+  acquisitionYear: 1 | 2 | 3;
+  active: boolean;
+  notes?: string;
+}
+
+export interface FixedAssetsAssumptions {
+  enabled: boolean;
+  applyToModel: boolean;
+  syncCapexToInvestment: boolean;
+  baselineMaterielAr: number;
+  items: FixedAssetItem[];
+}
+
 export interface FinancialAssumptions {
   // Haute Saison
   hauteSaison: SeasonAssumptions;
@@ -271,7 +392,9 @@ export interface FinancialAssumptions {
   // Detailed Logistics & Paddy Collection modeling (syncs with Carburant / rotation)
   logistics?: LogisticsAssumptions;
   // Selected Madagascar rice production region preset
-  selectedRegionId?: 'current' | 'alaotra' | 'marovoay' | 'vakinankaratra' | 'sofia';
+  selectedRegionId?: 'current' | 'alaotra' | 'itasy' | 'marovoay' | 'vakinankaratra' | 'sofia';
+  // Fixed assets register & annual depreciation (matériel agricole & unités de décorticage)
+  fixedAssets?: FixedAssetsAssumptions;
   // Climate hazard & yield shock modeling (syncs with paddy volume & milling yield)
   climateImpact?: ClimateImpactAssumptions;
   // Ariary exchange rate risk modeling on imported inputs & machinery
@@ -288,10 +411,16 @@ export interface FinancialAssumptions {
   traceabilityCertification?: TraceabilityCertificationAssumptions;
   // Imported rice market benchmarks & price positioning
   marketComparison?: MarketComparisonAssumptions;
+  // Local rice value-chain competitors (cost price & market shares)
+  competitors?: CompetitorBenchmarkAssumptions;
   // Machine maintenance calendar & technical downtime loss calculation
   machineMaintenance?: MachineMaintenanceSchedule;
   // Madagascar Agricultural VAT (TVA) modeling
   vatSettings?: VatAssumptions;
+  // Madagascar Communal Taxes & Land Royalties modeling
+  communalTaxes?: CommunalTaxesAssumptions;
+  // Paddy & Milled Rice Inventory Holding Costs & Working Capital (BFR) Optimization
+  stockManagement?: StockManagementAssumptions;
   // Fixed monthly charges
   fixedMonthlyCharges: FixedMonthlyCharge[];
   // Investment components
@@ -363,6 +492,9 @@ export interface Year1Result {
   netMarginAfterTaxRate: number;
   investorShareAr: number;
   companyShareAr: number;
+  annualDepreciationAr?: number;
+  depreciationTaxShieldAr?: number;
+  operatingCashFlowAfterTaxAr?: number;
 }
 
 export interface InvestmentResult {

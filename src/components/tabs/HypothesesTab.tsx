@@ -10,22 +10,19 @@ import { PestelAnalysisSection } from '../ui/PestelAnalysisSection';
 import { ClimateImpactSection } from '../ui/ClimateImpactSection';
 import { FxRiskSection } from '../ui/FxRiskSection';
 import { StorageOptimizationSection } from '../ui/StorageOptimizationSection';
+import { StockManagementBfrSection } from '../ui/StockManagementBfrSection';
+import { LogisticsTransportModule } from '../ui/LogisticsTransportModule';
 import { SubsidiesSection } from '../ui/SubsidiesSection';
 import { TraceabilityCertificationSection } from '../ui/TraceabilityCertificationSection';
-import { MachineMaintenanceCalendar } from '../ui/MachineMaintenanceCalendar';
 import { ComplianceAuditSection } from '../ui/ComplianceAuditSection';
 import { RegionSelectorSection } from '../ui/RegionSelectorSection';
 import { OperationalStressTestSection } from '../ui/OperationalStressTestSection';
 import { AgriculturalInflationSection } from '../ui/AgriculturalInflationSection';
 import { LoanRepaymentSection } from '../ui/LoanRepaymentSection';
 import { MadagascarVatCalculatorSection } from '../ui/MadagascarVatCalculatorSection';
-import { RoadCondition } from '../../types/finance';
-import {
-  computeSeasonLogisticsBreakdown,
-  getResolvedKpiThresholds,
-  getResolvedLogistics,
-  ROAD_CONDITION_META,
-} from '../../utils/logistics';
+import { CommunalTaxesSection } from '../ui/CommunalTaxesSection';
+import { FixedAssetsSection } from '../ui/FixedAssetsSection';
+import { getResolvedKpiThresholds, getResolvedLogistics } from '../../utils/logistics';
 import {
   Plus,
   Trash2,
@@ -67,7 +64,6 @@ export const HypothesesTab: React.FC = () => {
     updateSeasonField,
     updateInvestmentField,
     updateGeneralField,
-    updateLogistics,
     updateKpiThresholds,
     updateVariableCostPerKg,
     addVariableCostPerKg,
@@ -121,23 +117,6 @@ export const HypothesesTab: React.FC = () => {
 
   const logistics = getResolvedLogistics(assumptions);
   const kpiThresholds = getResolvedKpiThresholds(assumptions);
-  const logisticsHS = computeSeasonLogisticsBreakdown(logistics, 'hauteSaison');
-  const logisticsBS = computeSeasonLogisticsBreakdown(logistics, 'basseSaison');
-  const annualLogisticsCostAr =
-    logisticsHS.totalCostPerRotationAr * model.hauteSaison.totalRotations +
-    logisticsBS.totalCostPerRotationAr * model.basseSaison.totalRotations;
-  const logisticsShareOfOps =
-    model.year1.totalPurchaseAndOperatingCostsAr > 0
-      ? annualLogisticsCostAr / model.year1.totalPurchaseAndOperatingCostsAr
-      : 0;
-  const roadConditionOptions = (Object.keys(ROAD_CONDITION_META) as RoadCondition[]).map(
-    (key) => ({
-      value: key,
-      label: ROAD_CONDITION_META[key].label,
-      badge: `×${ROAD_CONDITION_META[key].multiplier.toFixed(2)}`,
-      description: ROAD_CONDITION_META[key].description,
-    })
-  );
 
   const handleConfirmDelete = () => {
     if (!pendingDelete) return;
@@ -1243,254 +1222,8 @@ export const HypothesesTab: React.FC = () => {
         </section>
       </div>
 
-      {/* 4b. Logistique et Transport — Collecte du Paddy */}
-      <section
-        aria-label="Logistique et Transport : modélisation du coût de collecte du paddy"
-        className="p-4 sm:p-5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 space-y-4"
-      >
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-zinc-100 dark:border-zinc-800/80">
-          <div className="flex items-start gap-2.5">
-            <Truck className="w-4 h-4 text-indigo-600 dark:text-indigo-400 mt-0.5 shrink-0" aria-hidden="true" />
-            <div>
-              <div className="flex items-center gap-1.5">
-                <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                  4b. Logistique et Transport (Collecte du Paddy)
-                </h2>
-                <Tooltip
-                  label="Logistique et Transport"
-                  content="Calcule le coût de collecte aller-retour (distance × 2 × consommation × coefficient d'état de route × prix gasoil + usure/km) et met automatiquement à jour la ligne Carburant & Transport du Compte de Résultat."
-                />
-              </div>
-              <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">
-                Modélisation selon la distance aller, l’état des routes malgaches et le carburant avec répercussion sur le Compte de Résultat.
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => updateLogistics({ enabled: !logistics.enabled })}
-            aria-pressed={logistics.enabled}
-            className={`min-h-10 px-3.5 py-1.5 rounded-xl border text-xs font-semibold inline-flex items-center gap-2 shrink-0 transition-colors ${
-              logistics.enabled
-                ? 'border-emerald-500/45 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-500/15'
-                : 'border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950/50 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-            }`}
-          >
-            {logistics.enabled ? (
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" aria-hidden="true" />
-            ) : (
-              <SlidersHorizontal className="w-3.5 h-3.5 text-zinc-500 dark:text-zinc-400 shrink-0" aria-hidden="true" />
-            )}
-            <span>
-              {logistics.enabled
-                ? 'Impact Compte de Résultat : Actif'
-                : 'Mode manuel (cliquer pour synchroniser)'}
-            </span>
-          </button>
-        </div>
-
-        {/* Paramètres véhicule & carburant communs */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <FormField
-            label="Prix du gasoil (Ar / L)"
-            unit="Ar / litre"
-            tooltip="Prix du gasoil à la pompe (Madagascar). Appliqué au volume consommé par aller-retour de collecte."
-            error={validation.errors['logistics.fuelPriceArPerLiter']}
-          >
-            {(props) => (
-              <input
-                {...props}
-                type="number"
-                step="100"
-                min="0"
-                value={logistics.fuelPriceArPerLiter}
-                onChange={(e) =>
-                  updateLogistics({ fuelPriceArPerLiter: Number(e.target.value) })
-                }
-              />
-            )}
-          </FormField>
-
-          <FormField
-            label="Consommation camion (L / 100 km)"
-            unit="litres / 100 km"
-            tooltip="Consommation nominale en charge sur route bitumée, majorée par le coefficient d'état de route."
-            error={validation.errors['logistics.fuelConsumptionLPer100Km']}
-          >
-            {(props) => (
-              <input
-                {...props}
-                type="number"
-                step="1"
-                min="0"
-                value={logistics.fuelConsumptionLPer100Km}
-                onChange={(e) =>
-                  updateLogistics({ fuelConsumptionLPer100Km: Number(e.target.value) })
-                }
-              />
-            )}
-          </FormField>
-
-          <FormField
-            label="Usure, péages & chauffeur (Ar / km)"
-            unit="Ar / km A/R"
-            tooltip="Coût d'entretien, pneumatiques, péages et indemnités kilométriques rapportés au kilomètre aller-retour."
-            error={validation.errors['logistics.truckTollAndWearArPerKm']}
-          >
-            {(props) => (
-              <input
-                {...props}
-                type="number"
-                step="50"
-                min="0"
-                value={logistics.truckTollAndWearArPerKm}
-                onChange={(e) =>
-                  updateLogistics({ truckTollAndWearArPerKm: Number(e.target.value) })
-                }
-              />
-            )}
-          </FormField>
-        </div>
-
-        {/* Parcours saisonniers HS / BS */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {[
-            {
-              key: 'HS' as const,
-              title: 'Collecte Haute Saison (HS)',
-              subtitle: `${model.hauteSaison.totalRotations} rotations / an`,
-              distance: logistics.distanceOneWayKmHS,
-              road: logistics.roadConditionHS,
-              breakdown: logisticsHS,
-              rotations: model.hauteSaison.totalRotations,
-              distError: validation.errors['logistics.distanceOneWayKmHS'],
-              onDistanceChange: (val: number) => updateLogistics({ distanceOneWayKmHS: val }),
-              onRoadChange: (val: RoadCondition) => updateLogistics({ roadConditionHS: val }),
-              accentClass: 'text-indigo-700 dark:text-indigo-400',
-            },
-            {
-              key: 'BS' as const,
-              title: 'Collecte Basse Saison (BS)',
-              subtitle: `${model.basseSaison.totalRotations} rotations / an`,
-              distance: logistics.distanceOneWayKmBS,
-              road: logistics.roadConditionBS,
-              breakdown: logisticsBS,
-              rotations: model.basseSaison.totalRotations,
-              distError: validation.errors['logistics.distanceOneWayKmBS'],
-              onDistanceChange: (val: number) => updateLogistics({ distanceOneWayKmBS: val }),
-              onRoadChange: (val: RoadCondition) => updateLogistics({ roadConditionBS: val }),
-              accentClass: 'text-teal-700 dark:text-teal-400',
-            },
-          ].map((seasonCfg) => {
-            const seasonTotalAr = seasonCfg.breakdown.totalCostPerRotationAr * seasonCfg.rotations;
-            return (
-              <div
-                key={seasonCfg.key}
-                className="p-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-950/40 space-y-3"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className={`text-xs font-bold uppercase tracking-wider ${seasonCfg.accentClass}`}>
-                    {seasonCfg.title}
-                  </span>
-                  <span className="text-[11px] font-mono tabular-nums text-zinc-600 dark:text-zinc-400">
-                    {seasonCfg.subtitle}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <FormField
-                    label="Distance aller simple (km)"
-                    unit="km (aller)"
-                    tooltip="Distance moyenne entre la zone de collecte de paddy et l'entrepôt/rizerie (doublée automatiquement pour l'aller-retour)."
-                    error={seasonCfg.distError}
-                  >
-                    {(props) => (
-                      <input
-                        {...props}
-                        type="number"
-                        step="5"
-                        min="0"
-                        value={seasonCfg.distance}
-                        onChange={(e) => seasonCfg.onDistanceChange(Number(e.target.value))}
-                      />
-                    )}
-                  </FormField>
-
-                  <div className="space-y-1">
-                    <LabelWithTooltip
-                      htmlFor={`logistics-road-${seasonCfg.key}`}
-                      label="État des routes"
-                      tooltip="Applique un coefficient de surconsommation et d'usure selon la praticabilité de l'axe."
-                      className="text-xs font-medium text-zinc-700 dark:text-zinc-300"
-                    />
-                    <SelectMenu
-                      id={`logistics-road-${seasonCfg.key}`}
-                      ariaLabel={`État des routes pour ${seasonCfg.title}`}
-                      value={seasonCfg.road}
-                      onChange={(val) => seasonCfg.onRoadChange(val as RoadCondition)}
-                      options={roadConditionOptions}
-                      className="w-full"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-zinc-200/70 dark:border-white/[0.06] text-xs font-mono tabular-nums">
-                  <div>
-                    <div className="text-[10px] font-sans text-zinc-500 dark:text-zinc-400">Aller-retour</div>
-                    <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-                      {seasonCfg.breakdown.roundTripKm.toLocaleString('fr-FR')} km
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] font-sans text-zinc-500 dark:text-zinc-400">Gasoil / rot.</div>
-                    <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-                      {seasonCfg.breakdown.litersPerRotation.toFixed(1)} L
-                    </div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] font-sans text-zinc-500 dark:text-zinc-400">Coût / rot.</div>
-                    <div className="font-bold text-zinc-900 dark:text-white">
-                      {formatAriary(seasonCfg.breakdown.totalCostPerRotationAr)}
-                    </div>
-                  </div>
-                  <div className="text-left sm:text-right">
-                    <div className="text-[10px] font-sans text-zinc-500 dark:text-zinc-400">Total saison</div>
-                    <div className={`font-bold ${seasonCfg.accentClass}`}>
-                      {formatAriary(seasonTotalAr, { inMillions: true })}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Synthèse annuelle d'impact sur le Compte de Résultat */}
-        <div className="p-3.5 rounded-xl border border-zinc-200 dark:border-white/[0.08] bg-zinc-100/70 dark:bg-[#141322] flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-          <div className="space-y-0.5">
-            <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-              {logistics.enabled
-                ? 'Impact direct appliqué au Compte de Résultat (Année 1)'
-                : 'Simulation logistique déconnectée (frais fixes manuels utilisés)'}
-            </div>
-            <p className="text-[11px] text-zinc-600 dark:text-zinc-400">
-              Carburant ({formatAriary(logisticsHS.fuelCostAr)} HS · {formatAriary(logisticsBS.fuelCostAr)} BS) + Usure &amp; route ({formatAriary(logisticsHS.wearAndDriverCostAr)} HS · {formatAriary(logisticsBS.wearAndDriverCostAr)} BS)
-            </p>
-          </div>
-          <div className="font-mono tabular-nums text-left sm:text-right shrink-0">
-            <div className="text-sm font-bold text-zinc-900 dark:text-white">
-              {formatAriary(annualLogisticsCostAr)} / an
-            </div>
-            <div className="text-[11px] text-zinc-600 dark:text-zinc-400">
-              soit {formatPercent(logisticsShareOfOps, 1)} des coûts d’exploitation
-            </div>
-          </div>
-        </div>
-
-        {/* Calendrier de Maintenance des Machines (Arrêts techniques & manque à gagner) */}
-        <MachineMaintenanceCalendar />
-      </section>
+      {/* 4b. Logistique & Transport (Rizières -> Rizerie -> Marchés urbains) */}
+      <LogisticsTransportModule />
 
       {/* 4c. Analyse d'impact climatique */}
       <ClimateImpactSection />
@@ -1500,6 +1233,9 @@ export const HypothesesTab: React.FC = () => {
 
       {/* 4e. Optimisation de stockage post-récolte */}
       <StorageOptimizationSection />
+
+      {/* 4f. Gestion des stocks paddy/riz usiné & BFR */}
+      <StockManagementBfrSection />
 
       {/* 5. Charges Fixes Mensuelles */}
       <section className="p-4 sm:p-5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/70 space-y-4">
@@ -1883,7 +1619,30 @@ export const HypothesesTab: React.FC = () => {
               </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+              <FormField
+                label="Marge nette min (%)"
+                unit="% du CA (ex : 8)"
+                tooltip="Si la marge nette après IR (Résultat net / CA) tombe sous ce seuil, une alerte visuelle se déclenche sur le Tableau de bord."
+                error={validation.errors['kpiThresholds.minNetMarginRate']}
+              >
+                {(props) => (
+                  <input
+                    {...props}
+                    type="number"
+                    step="1"
+                    min="-50"
+                    max="90"
+                    value={Number(((kpiThresholds.minNetMarginRate ?? 0.08) * 100).toFixed(1))}
+                    onChange={(e) =>
+                      updateKpiThresholds({
+                        minNetMarginRate: (Number(e.target.value) || 0) / 100,
+                      })
+                    }
+                  />
+                )}
+              </FormField>
+
               <FormField
                 label="Marge opérationnelle min (%)"
                 unit="% du CA (ex : 10)"
@@ -1992,8 +1751,9 @@ export const HypothesesTab: React.FC = () => {
               </FormField>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 text-[11px] font-mono tabular-nums">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2 text-[11px] font-mono tabular-nums">
               {[
+                kpiAlerts.items.netMargin,
                 kpiAlerts.items.operatingMargin,
                 kpiAlerts.items.grossMargin,
                 kpiAlerts.items.van,
@@ -2038,6 +1798,12 @@ export const HypothesesTab: React.FC = () => {
 
       {/* 13. Calculatrice TVA Agricole Madagascar (Intrants & Extrants) */}
       <MadagascarVatCalculatorSection />
+
+      {/* 14. Taxes communales et redevances foncières */}
+      <CommunalTaxesSection />
+
+      {/* 15. Gestion des Actifs Immobilisés & Dotations aux Amortissements */}
+      <FixedAssetsSection />
 
       {/* Audit de Conformité (Standards Filière Riz Madagascar) */}
       <ComplianceAuditSection />
