@@ -1,0 +1,8 @@
+{
+  "name": "Modélisation Financière Riziculture Madagascar",
+  "description": "Application web professionnelle de modélisation financière pour la transformation et commercialisation de riz à Madagascar : compte de résultat saisonnier, scénarios, seuil de rentabilité, payback, VAN, TRI et analyse de sensibilité.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

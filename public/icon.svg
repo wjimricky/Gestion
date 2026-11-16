@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0F0E1D" />
+      <stop offset="100%" stop-color="#1E1B4B" />
+    </linearGradient>
+    <linearGradient id="accentGrad" x1="120" y1="360" x2="392" y2="136" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6366F1" />
+      <stop offset="100%" stop-color="#2DD4BF" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)" />
+  <rect x="16" y="16" width="480" height="480" rx="96" stroke="#6366F1" stroke-opacity="0.28" stroke-width="4" />
+  <!-- Ascending financial bars -->
+  <rect x="116" y="280" width="56" height="108" rx="14" fill="#4F46E5" fill-opacity="0.72" />
+  <rect x="196" y="220" width="56" height="168" rx="14" fill="#6366F1" fill-opacity="0.88" />
+  <rect x="276" y="156" width="56" height="232" rx="14" fill="url(#accentGrad)" />
+  <!-- Stylized rice grain / leaf crest -->
+  <path d="M358 124C392 124 416 148 416 184C416 226 382 260 344 260C344 210 344 166 358 124Z" fill="#2DD4BF" />
+  <path d="M356 154C374 168 384 190 384 216" stroke="#0F0E1D" stroke-width="8" stroke-linecap="round" />
+  <!-- Trend curve -->
+  <path d="M112 246L208 184L296 132L340 156" stroke="#A5B4FC" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="340" cy="156" r="12" fill="#2DD4BF" stroke="#0F0E1D" stroke-width="5" />
+</svg>
