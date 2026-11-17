@@ -1,6 +1,4 @@
-import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import {
-  getAuth,
   GoogleAuthProvider,
   signInWithPopup,
   signOut,
@@ -8,7 +6,7 @@ import {
   User,
   Auth,
 } from 'firebase/auth';
-import firebaseConfig from '../../firebase-applet-config.json';
+import { auth as sharedAuth } from './firebase';
 
 /**
  * Exact OAuth scopes requested via set_up_oauth (principle of least privilege):
@@ -24,21 +22,12 @@ export const GOOGLE_WORKSPACE_SCOPES = [
 
 export const GOOGLE_SHEETS_SCOPES = GOOGLE_WORKSPACE_SCOPES;
 
-let appInstance: FirebaseApp | null = null;
-let authInstance: Auth | null = null;
-
 // Strictly in-memory OAuth access token cache (NEVER persisted to localStorage/sessionStorage)
 let inMemoryAccessToken: string | null = null;
 let inMemoryTokenObtainedAt = 0;
 
 function ensureFirebaseAuth(): Auth {
-  if (!appInstance) {
-    appInstance = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-  }
-  if (!authInstance) {
-    authInstance = getAuth(appInstance);
-  }
-  return authInstance;
+  return sharedAuth;
 }
 
 export function getInMemoryGoogleAccessToken(): string | null {

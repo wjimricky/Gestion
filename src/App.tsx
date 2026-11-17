@@ -13,12 +13,24 @@ import { ProjectComparatorModal } from './components/ui/ProjectComparatorModal';
 import { FinancialGlossaryModal } from './components/ui/FinancialGlossaryModal';
 import { GoogleSheetsExportModal } from './components/ui/GoogleSheetsExportModal';
 import { CustomPdfExportModal } from './components/ui/CustomPdfExportModal';
+import { DashboardChartExportModal } from './components/ui/DashboardChartExportModal';
 import { OfflineIndicator } from './components/ui/OfflineIndicator';
 import { InteractiveTour, TOUR_STORAGE_KEY } from './components/ui/InteractiveTour';
 import { TooltipProvider } from './components/ui/Tooltip';
+import { FirestoreErrorBoundary } from './components/ui/FirestoreErrorBoundary';
+import { GeminiAdvisorDrawer } from './components/ui/GeminiAdvisorDrawer';
+import { MadagascarRiceMapSection } from './components/maps/MadagascarRiceMapSection';
+import { RiceMill3DScene } from './components/three/RiceMill3DScene';
 import { formatAriary, formatMonths, formatPercent } from './utils/formatters';
 import { exportDashboardToPdf, PdfExportSectionsConfig } from './utils/exportPdf';
 import { exportModelToDocx } from './utils/exportDocx';
+import {
+  exportExecutiveSummaryMarkdown,
+  exportStructuredCooperativeJson,
+} from './utils/exportMarkdownAndJson';
+import { buildMonthlyTreasuryPlan } from './utils/treasury';
+import { computeGeneralLiquidityRatio } from './utils/liquidityAndCampaign';
+import { AlertTriangle, X } from 'lucide-react';
 import { DashboardTab } from './components/tabs/DashboardTab';
 import { HypothesesTab } from './components/tabs/HypothesesTab';
 import { PartnersEcosystemTab } from './components/tabs/PartnersEcosystemTab';
@@ -58,6 +70,7 @@ function MainApp() {
     pestelAnalysis,
     model,
     assumptions,
+    treasurySettings,
     savedScenarios,
     activeScenarioId,
     theme,
@@ -88,8 +101,19 @@ function MainApp() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
   const [customPdfModalOpen, setCustomPdfModalOpen] = useState(false);
+  const [chartExportModalOpen, setChartExportModalOpen] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isExportingDocx, setIsExportingDocx] = useState(false);
+  const [geminiDrawerOpen, setGeminiDrawerOpen] = useState(false);
+  const [mapsQuotaExceeded, setMapsQuotaExceeded] = useState(false);
+
+  const ensureDashboardReady = useCallback(async () => {
+    if (currentTab !== 'dashboard') {
+      setCurrentTab('dashboard');
+    }
+    window.dispatchEvent(new CustomEvent('riz:dashboard-overview'));
+    await new Promise((r) => window.setTimeout(r, currentTab !== 'dashboard' ? 500 : 120));
+  }, [currentTab]);
 
   const handleOpenScenarioManager = useCallback((mode: 'list' | 'create' = 'list') => {
     setScenarioModalMode(mode);
@@ -146,6 +170,70 @@ function MainApp() {
     URL.revokeObjectURL(url);
     notify('success', 'Fichier JSON exporté.');
   }, [exportToJson, notify]);
+
+  const handleExportExecutiveMarkdown = useCallback(() => {
+    const scenarioName =
+      savedScenarios.find((s) => s.id === activeScenarioId)?.name || 'Scénario courant';
+    const treasuryPlan = buildMonthlyTreasuryPlan(model, treasurySettings);
+    const liquidity = computeGeneralLiquidityRatio(
+      assumptions,
+      model,
+      treasuryPlan,
+      treasurySettings
+    );
+    exportExecutiveSummaryMarkdown({
+      model,
+      projectName: activeProject.name,
+      scenarioName,
+      liquidity,
+      dashboardNotes: dashboardReportNotes,
+    });
+    notify('success', 'Executive Summary (.md) exporté.');
+  }, [
+    activeProject.name,
+    activeScenarioId,
+    assumptions,
+    dashboardReportNotes,
+    model,
+    notify,
+    savedScenarios,
+    treasurySettings,
+  ]);
+
+  const handleExportStructuredCoopJson = useCallback(() => {
+    const scenarioName =
+      savedScenarios.find((s) => s.id === activeScenarioId)?.name || 'Scénario courant';
+    const treasuryPlan = buildMonthlyTreasuryPlan(model, treasurySettings);
+    const liquidity = computeGeneralLiquidityRatio(
+      assumptions,
+      model,
+      treasuryPlan,
+      treasurySettings
+    );
+    exportStructuredCooperativeJson({
+      model,
+      projectName: activeProject.name,
+      scenarioName,
+      liquidity,
+    });
+    notify('success', 'JSON structuré Coopératives (.json) exporté.');
+  }, [
+    activeProject.name,
+    activeScenarioId,
+    assumptions,
+    model,
+    notify,
+    savedScenarios,
+    treasurySettings,
+  ]);
+
+  useEffect(() => {
+    const handleQuotaExceeded = () => {
+      setMapsQuotaExceeded(true);
+    };
+    window.addEventListener('gmp-quota-exceeded', handleQuotaExceeded);
+    return () => window.removeEventListener('gmp-quota-exceeded', handleQuotaExceeded);
+  }, []);
 
   const handleExportPdf = useCallback(async (customSections?: PdfExportSectionsConfig) => {
     if (isExportingPdf) return;
@@ -313,6 +401,40 @@ function MainApp() {
         Aller au contenu principal
       </a>
 
+      {/* Google Maps Platform Quota Exceeded Sticky Banner */}
+      {mapsQuotaExceeded && (
+        <div
+          role="alert"
+          className="sticky top-0 z-50 bg-amber-50 dark:bg-amber-950 border-b border-amber-300 dark:border-amber-700 px-4 py-2.5 text-xs text-amber-950 dark:text-amber-100 no-print"
+        >
+          <div className="max-w-[1600px] mx-auto flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertTriangle className="w-4 h-4 text-amber-700 dark:text-amber-300 shrink-0" aria-hidden="true" />
+              <p className="leading-snug">
+                Le quota Google Maps Platform de cette prévisualisation a été dépassé. Consultez{' '}
+                <a
+                  href="https://developers.google.com/maps/ai/ai-studio?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline font-semibold hover:text-amber-700 dark:hover:text-amber-200"
+                >
+                  la documentation sur les limites de quota Google Maps
+                </a>{' '}
+                ou basculez vers votre propre projet facturé.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setMapsQuotaExceeded(false)}
+              aria-label="Fermer l’avertissement de quota Maps"
+              className="p-1 rounded-lg hover:bg-amber-200/60 dark:hover:bg-amber-900/60 shrink-0"
+            >
+              <X className="w-4 h-4" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Top Bar Header */}
       <Header
         onSelectTab={setCurrentTab}
@@ -329,6 +451,10 @@ function MainApp() {
         onOpenCommandPalette={() => setCommandPaletteOpen(true)}
         onStartTour={handleStartTour}
         onOpenGoogleSheetsExport={() => setGoogleSheetsModalOpen(true)}
+        onExportExecutiveMarkdown={handleExportExecutiveMarkdown}
+        onExportStructuredCoopJson={handleExportStructuredCoopJson}
+        onOpenGeminiDrawer={() => setGeminiDrawerOpen(true)}
+        onOpenChartExportModal={() => setChartExportModalOpen(true)}
       />
 
       {/* Main Workspace: Sidebar + Content (Sidebar masquée en mode plein écran) */}
@@ -415,11 +541,17 @@ function MainApp() {
               isExportingDocx={isExportingDocx}
               onSaveScenario={() => handleOpenScenarioManager('create')}
               onOpenGoogleSheetsExport={() => setGoogleSheetsModalOpen(true)}
+              onExportExecutiveMarkdown={handleExportExecutiveMarkdown}
+              onExportStructuredCoopJson={handleExportStructuredCoopJson}
+              onOpenGeminiDrawer={() => setGeminiDrawerOpen(true)}
+              onOpenChartExportModal={() => setChartExportModalOpen(true)}
             />
           )}
           {currentTab === 'hypotheses' && <HypothesesTab />}
           {currentTab === 'partenaires' && <PartnersEcosystemTab />}
           {currentTab === 'concurrence' && <ConcurrenceTab />}
+          {currentTab === 'carte' && <MadagascarRiceMapSection />}
+          {currentTab === 'usine3d' && <RiceMill3DScene />}
           {currentTab === 'scenarios' && (
             <ScenariosTab onOpenScenarioManager={() => handleOpenScenarioManager('list')} />
           )}
@@ -464,6 +596,10 @@ function MainApp() {
         onOpenCommandPalette={() => setCommandPaletteOpen(true)}
         onStartTour={handleStartTour}
         onOpenGoogleSheetsExport={() => setGoogleSheetsModalOpen(true)}
+        onExportExecutiveMarkdown={handleExportExecutiveMarkdown}
+        onExportStructuredCoopJson={handleExportStructuredCoopJson}
+        onOpenGeminiDrawer={() => setGeminiDrawerOpen(true)}
+        onOpenChartExportModal={() => setChartExportModalOpen(true)}
       />
 
       {/* Scenario Manager Modal */}
@@ -520,6 +656,14 @@ function MainApp() {
         onExport={(sections) => void handleExportPdf(sections)}
       />
 
+      {/* Dashboard Charts Individual Export Modal (PNG / SVG for PowerPoint) */}
+      <DashboardChartExportModal
+        open={chartExportModalOpen}
+        onClose={() => setChartExportModalOpen(false)}
+        ensureDashboardReady={ensureDashboardReady}
+        notify={notify}
+      />
+
       {/* Command Palette Modal (Ctrl+K) */}
       <CommandPaletteModal
         open={commandPaletteOpen}
@@ -543,7 +687,11 @@ function MainApp() {
         onExportCsv5Y={exportFiveYearProjectionsToCsv}
         onExportJson={handleDownloadJson}
         onImportJson={() => jsonImportInputRef.current?.click()}
+        onExportExecutiveMarkdown={handleExportExecutiveMarkdown}
+        onExportStructuredCoopJson={handleExportStructuredCoopJson}
+        onOpenGeminiDrawer={() => setGeminiDrawerOpen(true)}
         onExportGoogleSheets={() => setGoogleSheetsModalOpen(true)}
+        onOpenChartExportModal={() => setChartExportModalOpen(true)}
         onPrintReport={() => window.print()}
         theme={theme}
         onToggleTheme={toggleTheme}
@@ -558,6 +706,12 @@ function MainApp() {
         currentTab={currentTab}
         onSelectTab={setCurrentTab}
         onClose={() => setTourOpen(false)}
+      />
+
+      {/* Conseiller Financier IA Drawer */}
+      <GeminiAdvisorDrawer
+        open={geminiDrawerOpen}
+        onClose={() => setGeminiDrawerOpen(false)}
       />
 
       {/* Offline Field Indicator */}
@@ -598,10 +752,12 @@ function MainApp() {
 
 export default function App() {
   return (
-    <TooltipProvider delayDuration={150}>
-      <FinancialProvider>
-        <MainApp />
-      </FinancialProvider>
-    </TooltipProvider>
+    <FirestoreErrorBoundary>
+      <TooltipProvider delayDuration={150}>
+        <FinancialProvider>
+          <MainApp />
+        </FinancialProvider>
+      </TooltipProvider>
+    </FirestoreErrorBoundary>
   );
 }

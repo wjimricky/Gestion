@@ -94,6 +94,13 @@ export interface ClimateLossCoefficient {
   active: boolean;
 }
 
+export interface ClimateFiveYearVulnerability {
+  cycloneAnnualProbPct: number; // 0..100
+  droughtAnnualProbPct: number; // 0..100
+  floodAnnualProbPct: number; // 0..100
+  safetyReserveTargetMonths: number; // target months of fixed charges + 1 rotation BFR
+}
+
 export interface ClimateImpactAssumptions {
   enabled: boolean;
   hazardType: ClimateHazardType;
@@ -109,6 +116,7 @@ export interface ClimateImpactAssumptions {
   useCustomCoefficients?: boolean;
   coefficientAggregationMode?: 'cumulative' | 'expected_probability';
   customCoefficients?: ClimateLossCoefficient[];
+  fiveYearVulnerability?: ClimateFiveYearVulnerability;
 }
 
 export type FxCurrencyReference = 'EUR' | 'USD' | 'mixte';
@@ -319,8 +327,11 @@ export type VatRiceOutputMode = 'exonere_ppn' | 'assujetti_20' | 'mixte_b2b';
 export interface VatAssumptions {
   enabled: boolean;
   applyToCashFlow: boolean;
+  applyToFinancialStatements?: boolean; // Intègre collecte, crédit & TVA rémanente aux états financiers
   regime: VatRegime;
-  vatRate: number; // standard 0.20 in Madagascar CGI
+  vatRate: number; // taux légal de référence (0.20 à Madagascar)
+  inputVatRate?: number; // taux TVA applicable aux intrants & CAPEX (défaut = vatRate)
+  outputVatRate?: number; // taux TVA applicable aux produits finis vendus (défaut = vatRate)
   riceOutputMode: VatRiceOutputMode;
   taxableRiceSharePct: number; // 0..100 when riceOutputMode === 'mixte_b2b'
   byproductTaxable: boolean; // son & brisure
@@ -328,6 +339,85 @@ export interface VatAssumptions {
   millingAndBagsVatApplicable: boolean;
   fixedChargesTaxableSharePct: number; // e.g. 45% (excluding salaries)
   capexVatRecoverable: boolean;
+}
+
+export interface VatSeasonBreakdown {
+  season: 'HS' | 'BS';
+  months: number;
+  turnoverHtAr: number;
+  taxableTurnoverAr: number;
+  tvaCollecteeAr: number;
+  taxableInputsHtAr: number;
+  tvaBruteSurIntrantsAr: number;
+  tvaDeductibleOpexAr: number;
+  tvaRemanenteOpexAr: number;
+}
+
+export interface VatMonthlyEntry {
+  month: number;
+  label: string;
+  period: 'HS' | 'BS';
+  tvaCollecteeAr: number;
+  tvaDeductibleAr: number;
+  tvaRemanenteAr: number;
+  tvaNetteAPayerAr: number;
+  creditTvaReporteAr: number;
+  cashFlowBeforeVatAr: number;
+  vatCashImpactAr: number; // negative = net cash outflow due to VAT/remnant VAT, positive = VAT refund/shield
+  cashFlowAfterVatAr: number;
+}
+
+export interface VatSimulationResult {
+  settings: VatAssumptions;
+  inputVatRate: number;
+  outputVatRate: number;
+  isAssujetti: boolean;
+  prorataDeduction: number; // 0..1
+  hauteSaison: VatSeasonBreakdown;
+  basseSaison: VatSeasonBreakdown;
+  annualTvaCollecteeAr: number;
+  annualTvaDeductibleOpexAr: number;
+  capexTvaBruteAr: number;
+  capexTvaDeductibleAr: number;
+  capexTvaRemanenteAr: number;
+  annualTvaRemanenteNonDeductibleAr: number;
+  annualTvaNetteVerseeDgiAr: number;
+  yearEndCreditTvaAr: number;
+  avgMonthlyCreditTvaAr: number;
+  avgMonthlyVatPayableAr: number;
+  year1CashFlowBeforeVatAr: number;
+  year1VatCashImpactAr: number;
+  year1CashFlowAfterVatAr: number;
+  dgiThresholdExceeded: boolean;
+  dgiThresholdWarning: string | null;
+  monthlySchedule: VatMonthlyEntry[];
+}
+
+export type OperationalRiskCategory =
+  | 'equipement'
+  | 'rendement'
+  | 'approvisionnement'
+  | 'stockage'
+  | 'logistique'
+  | 'marche';
+
+export interface OperationalRiskItem {
+  id: string;
+  label: string;
+  category: OperationalRiskCategory;
+  probabilityPct: number; // 0..100
+  financialImpactAr: number; // Perte financière si le risque se réalise (Ar/an)
+  mitigationCostAr: number; // Coût annuel indicatif de prévention/couverture (Ar/an)
+  active: boolean;
+  notes?: string;
+}
+
+export interface RiskAnalysisAssumptions {
+  enabled: boolean;
+  integrateIntoScenarios: boolean; // Intègre la perte espérée pondérée dans les scénarios financiers
+  pessimisticMultiplier: number; // Multiplicateur appliqué en scénario Pessimiste (défaut 1.5x)
+  optimisticResidualRatio: number; // Part résiduelle en scénario Optimiste (défaut 0.35x)
+  risks: OperationalRiskItem[];
 }
 
 export type CommunalTaxPresetId =
@@ -377,6 +467,26 @@ export interface FixedAssetsAssumptions {
   items: FixedAssetItem[];
 }
 
+export type HrPoleType = 'rizieres' | 'transformation';
+
+export interface HrRoleItem {
+  id: string;
+  label: string;
+  pole: HrPoleType;
+  headcountHS: number;
+  headcountBS: number;
+  monthlyGrossSalaryAr: number;
+  annualTrainingPerPersonAr: number;
+  active: boolean;
+}
+
+export interface HumanResourcesAssumptions {
+  enabled: boolean;
+  applyToModel: boolean; // Opt-in sync adds HR seasonal payroll line into fixed charges
+  socialChargesRatePct: number; // Madagascar CNaPS (13%) + OSTIE (5%) = 18%
+  roles: HrRoleItem[];
+}
+
 export interface FinancialAssumptions {
   // Haute Saison
   hauteSaison: SeasonAssumptions;
@@ -421,6 +531,10 @@ export interface FinancialAssumptions {
   communalTaxes?: CommunalTaxesAssumptions;
   // Paddy & Milled Rice Inventory Holding Costs & Working Capital (BFR) Optimization
   stockManagement?: StockManagementAssumptions;
+  // Seasonal Human Resources planning (Rizières vs Transformation, CNaPS/OSTIE, Formation)
+  hrPlanning?: HumanResourcesAssumptions;
+  // Operational Risk Probability & Expected Loss modeling (integrates into scenarios)
+  riskAnalysis?: RiskAnalysisAssumptions;
   // Fixed monthly charges
   fixedMonthlyCharges: FixedMonthlyCharge[];
   // Investment components
@@ -495,6 +609,12 @@ export interface Year1Result {
   annualDepreciationAr?: number;
   depreciationTaxShieldAr?: number;
   operatingCashFlowAfterTaxAr?: number;
+  vatActive?: boolean;
+  annualTvaCollecteeAr?: number;
+  annualTvaDeductibleAr?: number;
+  annualTvaRemanenteAr?: number;
+  annualTvaNetteVerseeDgiAr?: number;
+  yearEndCreditTvaAr?: number;
 }
 
 export interface InvestmentResult {
@@ -640,6 +760,8 @@ export interface ScenarioResult {
   annualNetAfterTaxAr: number;
   annualNetMarginRate: number;
   varianceFromRealisticAr: number;
+  expectedRiskLossAr?: number;
+  annualNetBeforeRiskAr?: number;
   verdict: 'Rentable sur les 2 saisons' | 'Une saison déficitaire' | 'Perte annuelle';
 }
 
@@ -678,4 +800,5 @@ export interface FullFinancialModel {
     optimiste: ScenarioResult;
     customScenarios: ScenarioResult[];
   };
+  vatSummary?: VatSimulationResult;
 }

@@ -16,6 +16,8 @@ import {
   SensitivityMatrix,
 } from '../types/finance';
 import { computeFixedAssetsAnalysis } from '../utils/fixedAssets';
+import { computeMadagascarVatSimulation, getResolvedVatAssumptions } from '../utils/vatMadagascar';
+import { getScenarioExpectedRiskLoss } from '../utils/riskAnalysis';
 
 /**
  * Computes the operational and financial results of a single season (Haute or Basse Saison).
@@ -749,10 +751,14 @@ export function computeScenario(
   const caBS = caRotationBS * rotationsBS * baseAssumptions.basseSaison.months;
   const costsBS = (costRotationBS * rotationsBS + monthlyFixedCharges) * baseAssumptions.basseSaison.months;
 
+  // Operational risk expected loss (opt-in via riskAnalysis.integrateIntoScenarios)
+  const expectedRiskLossAr = getScenarioExpectedRiskLoss(baseAssumptions, definition.id);
+
   // Annual
   const annualTurnoverAr = caHS + caBS;
-  const annualTotalCostsAr = costsHS + costsBS;
-  const annualNetBeforeTaxAr = seasonNetHS + seasonNetBS;
+  const annualNetBeforeRiskAr = seasonNetHS + seasonNetBS;
+  const annualTotalCostsAr = costsHS + costsBS + expectedRiskLossAr;
+  const annualNetBeforeTaxAr = annualNetBeforeRiskAr - expectedRiskLossAr;
   const annualTaxAr = Math.max(0, annualNetBeforeTaxAr) * baseAssumptions.corporateTaxRate;
   const annualNetAfterTaxAr = annualNetBeforeTaxAr - annualTaxAr;
   const annualNetMarginRate = annualTurnoverAr > 0 ? annualNetBeforeTaxAr / annualTurnoverAr : 0;
@@ -795,6 +801,8 @@ export function computeScenario(
     annualNetAfterTaxAr,
     annualNetMarginRate,
     varianceFromRealisticAr,
+    expectedRiskLossAr,
+    annualNetBeforeRiskAr,
     verdict,
   };
 }
@@ -1072,11 +1080,41 @@ export function calculateFullModel(
 
   const scenarios = computeAllScenarios(assumptions, customScenarioDefs);
 
+  const vatSettings = assumptions.vatSettings
+    ? getResolvedVatAssumptions(assumptions)
+    : null;
+  const vatSummary = vatSettings?.enabled
+    ? computeMadagascarVatSimulation(
+        assumptions,
+        { hauteSaison, basseSaison, year1, payback },
+        vatSettings
+      )
+    : undefined;
+
+  const vatActiveInStatements = Boolean(
+    vatSummary &&
+      vatSettings?.enabled &&
+      (vatSettings.applyToFinancialStatements || vatSettings.applyToCashFlow)
+  );
+
+  const enrichedYear1: Year1Result = vatSummary
+    ? {
+        ...year1,
+        vatActive: vatActiveInStatements,
+        annualTvaCollecteeAr: vatSummary.annualTvaCollecteeAr,
+        annualTvaDeductibleAr:
+          vatSummary.annualTvaDeductibleOpexAr + vatSummary.capexTvaDeductibleAr,
+        annualTvaRemanenteAr: vatSummary.annualTvaRemanenteNonDeductibleAr,
+        annualTvaNetteVerseeDgiAr: vatSummary.annualTvaNetteVerseeDgiAr,
+        yearEndCreditTvaAr: vatSummary.yearEndCreditTvaAr,
+      }
+    : year1;
+
   return {
     assumptions,
     hauteSaison,
     basseSaison,
-    year1,
+    year1: enrichedYear1,
     investment,
     breakEven,
     payback,
@@ -1084,5 +1122,6 @@ export function calculateFullModel(
     npv,
     irr,
     scenarios,
+    vatSummary,
   };
 }

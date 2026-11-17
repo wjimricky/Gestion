@@ -19,7 +19,10 @@ import {
   StockManagementAssumptions,
   CompetitorBenchmarkAssumptions,
   FixedAssetsAssumptions,
+  HumanResourcesAssumptions,
+  RiskAnalysisAssumptions,
 } from '../types/finance';
+import type { User } from 'firebase/auth';
 import {
   ExcelImportMetadata,
   FinancingPlanAnchorId,
@@ -96,6 +99,7 @@ import {
   getResolvedTraceability,
   hasActiveCertificationImpact,
 } from '../utils/traceability';
+import { getResolvedRiskAnalysis } from '../utils/riskAnalysis';
 import { getResolvedMarketComparison } from '../utils/marketComparison';
 import {
   applyMaintenanceToAssumptions,
@@ -116,6 +120,21 @@ import {
   computeFixedAssetsAnalysis,
   getResolvedFixedAssets,
 } from '../utils/fixedAssets';
+import {
+  applyHrPlanningToFixedCharges,
+  getResolvedHrPlanning,
+} from '../utils/hrPlanning';
+import {
+  signInWithGoogleCloud,
+  signOutFirebaseCloud,
+  subscribeFirebaseAuth,
+} from '../services/firebase';
+import {
+  deleteProjectFromFirestore,
+  saveProjectToFirestore,
+  subscribeUserProjectsFromFirestore,
+  syncUserProfileToFirestore,
+} from '../services/firestoreSync';
 import {
   EmailAlertHistoryEntry,
   EmailAlertRuleConfig,
@@ -264,6 +283,8 @@ interface FinancialContextType {
   updateCommunalTaxes: (patch: Partial<CommunalTaxesAssumptions>) => void;
   updateStockManagement: (patch: Partial<StockManagementAssumptions>) => void;
   updateFixedAssets: (patch: Partial<FixedAssetsAssumptions>) => void;
+  updateHumanResources: (patch: Partial<HumanResourcesAssumptions>) => void;
+  updateRiskAnalysis: (patch: Partial<RiskAnalysisAssumptions>) => void;
   updateKpiThresholds: (patch: Partial<KpiAlertThresholds>) => void;
   // Dynamic cost list updaters
   updateVariableCostPerKg: (id: string, field: 'costHS' | 'costBS' | 'label', value: string | number) => void;
@@ -285,13 +306,21 @@ interface FinancialContextType {
   deleteScenario: (id: string) => void;
   renameScenario: (id: string, newName: string, newDescription?: string) => void;
   resetToDefaults: () => void;
-  // Import / Export
+  // Import / Export & Full Backup
   exportToJson: () => string;
   importFromJson: (jsonStr: string) => boolean;
+  exportFullBackupJson: () => string;
+  importFullBackupJson: (jsonStr: string) => boolean;
   exportToExcel: () => void;
   exportProjectionsToCsv: () => void;
   exportFiveYearProjectionsToCsv: () => void;
   exportSeasonalIncomeStatementToCsv: () => void;
+  // Cloud Auth & Sync (Firebase Firestore)
+  cloudUser: User | null;
+  cloudSyncStatus: 'offline' | 'syncing' | 'synced' | 'error';
+  signInCloud: () => Promise<void>;
+  signOutCloud: () => Promise<void>;
+  syncActiveProjectToCloud: () => Promise<void>;
   // Projects management
   projects: ProjectRecord[];
   activeProject: ProjectRecord;
@@ -864,31 +893,34 @@ export const FinancialProvider: React.FC<{ children: ReactNode }> = ({ children 
     prevStockStatusRef.current = paddyStockStatus.status;
   }, [paddyStockStatus, activeProjectId, notify]);
 
-  // Real-time Intelligent Treasury Alert (2+ consecutive negative months)
+  // Real-time Intelligent Treasury Stress-Test Alert (any negative monthly cash balance)
   const treasurySmartAlert = useMemo(
     () => evaluateConsecutiveNegativeCashAlert(model, treasurySettings),
     [model, treasurySettings]
   );
 
-  const prevTreasuryStreakRef = useRef<boolean | null>(null);
+  const prevTreasuryNegativeRef = useRef<boolean | null>(null);
   const lastTreasuryProjectRef = useRef<string>(activeProjectId);
 
   useEffect(() => {
     if (
-      prevTreasuryStreakRef.current === null ||
+      prevTreasuryNegativeRef.current === null ||
       lastTreasuryProjectRef.current !== activeProjectId
     ) {
-      prevTreasuryStreakRef.current = treasurySmartAlert.hasConsecutiveNegativeStreak;
+      prevTreasuryNegativeRef.current = treasurySmartAlert.hasNegativeMonth;
       lastTreasuryProjectRef.current = activeProjectId;
       return;
     }
-    if (!prevTreasuryStreakRef.current && treasurySmartAlert.hasConsecutiveNegativeStreak) {
+    if (!prevTreasuryNegativeRef.current && treasurySmartAlert.hasNegativeMonth) {
+      const periodText = treasurySmartAlert.hasConsecutiveNegativeStreak
+        ? `${treasurySmartAlert.negativeMonthsCount} mois négatif(s) dont ${treasurySmartAlert.maxConsecutiveMonths} consécutifs (${treasurySmartAlert.streakStartLabel}–${treasurySmartAlert.streakEndLabel})`
+        : `${treasurySmartAlert.negativeMonthsCount} mois négatif(s) (${treasurySmartAlert.negativeMonthsLabels.join(', ')})`;
       notify(
         'error',
-        `Alerte trésorerie : solde négatif prévu pendant ${treasurySmartAlert.maxConsecutiveMonths} mois consécutifs (${treasurySmartAlert.streakStartLabel}–${treasurySmartAlert.streakEndLabel}). Ajustez le plan d’investissement ou les conditions de vente.`
+        `Test de résistance trésorerie : solde mensuel négatif sur ${periodText}. Suggestion : activez un délai fournisseurs (+${treasurySmartAlert.recommendedSupplierDpoDays} j DPO) ou réduisez le stock de sécurité (−${treasurySmartAlert.recommendedSafetyStockReductionDays} j).`
       );
     }
-    prevTreasuryStreakRef.current = treasurySmartAlert.hasConsecutiveNegativeStreak;
+    prevTreasuryNegativeRef.current = treasurySmartAlert.hasNegativeMonth;
   }, [treasurySmartAlert, activeProjectId, notify]);
 
   const prevBreachedRef = useRef<Set<string> | null>(null);
@@ -2156,6 +2188,89 @@ export const FinancialProvider: React.FC<{ children: ReactNode }> = ({ children 
     });
   };
 
+  const updateRiskAnalysis = (patch: Partial<RiskAnalysisAssumptions>) => {
+    const prevRisk = getResolvedRiskAnalysis(assumptionsRef.current);
+    const nextRisk: RiskAnalysisAssumptions = {
+      ...prevRisk,
+      ...patch,
+    };
+
+    if (
+      patch.integrateIntoScenarios !== undefined &&
+      patch.integrateIntoScenarios !== prevRisk.integrateIntoScenarios
+    ) {
+      recordAuditChange(
+        'riskAnalysis.integrateIntoScenarios',
+        'Perte espérée (Risques op.) → Scénarios',
+        prevRisk.integrateIntoScenarios ? 'Intégrée aux scénarios' : 'Simulation seule',
+        nextRisk.integrateIntoScenarios ? 'Intégrée aux scénarios' : 'Simulation seule',
+        'Formulaire'
+      );
+    } else if (patch.risks !== undefined && patch.risks.length !== prevRisk.risks.length) {
+      recordAuditChange(
+        'riskAnalysis.risks',
+        'Registre des risques opérationnels',
+        `${prevRisk.risks.length} risques`,
+        `${nextRisk.risks.length} risques`,
+        'Formulaire'
+      );
+    }
+
+    setAssumptions((prev) => ({
+      ...prev,
+      riskAnalysis: {
+        ...getResolvedRiskAnalysis(prev),
+        ...patch,
+      },
+    }));
+  };
+
+  const updateHumanResources = (patch: Partial<HumanResourcesAssumptions>) => {
+    const prevHr = getResolvedHrPlanning(assumptionsRef.current);
+    const nextHr: HumanResourcesAssumptions = {
+      ...prevHr,
+      ...patch,
+    };
+
+    if (patch.applyToModel !== undefined && patch.applyToModel !== prevHr.applyToModel) {
+      recordAuditChange(
+        'hrPlanning.applyToModel',
+        'Planification RH → Charges fixes',
+        prevHr.applyToModel ? 'Intégrée au modèle' : 'Simulée seule',
+        nextHr.applyToModel ? 'Intégrée au modèle' : 'Simulée seule',
+        'Formulaire'
+      );
+    } else if (
+      patch.socialChargesRatePct !== undefined &&
+      patch.socialChargesRatePct !== prevHr.socialChargesRatePct
+    ) {
+      recordAuditChange(
+        'hrPlanning.socialChargesRatePct',
+        'Charges sociales RH (CNaPS/OSTIE)',
+        `${prevHr.socialChargesRatePct} %`,
+        `${nextHr.socialChargesRatePct} %`,
+        'Formulaire'
+      );
+    }
+
+    setAssumptions((prev) => {
+      const mergedHr: HumanResourcesAssumptions = {
+        ...getResolvedHrPlanning(prev),
+        ...patch,
+      };
+      const nextFixed = applyHrPlanningToFixedCharges(
+        prev.fixedMonthlyCharges,
+        mergedHr,
+        prev
+      );
+      return {
+        ...prev,
+        hrPlanning: mergedHr,
+        fixedMonthlyCharges: nextFixed,
+      };
+    });
+  };
+
   const updateKpiThresholds = (patch: Partial<KpiAlertThresholds>) => {
     const prevT = getResolvedKpiThresholds(assumptionsRef.current);
     const nextT: KpiAlertThresholds = {
@@ -2683,6 +2798,299 @@ export const FinancialProvider: React.FC<{ children: ReactNode }> = ({ children 
     return false;
   };
 
+  // Full Project Backup & Restore (.json)
+  const exportFullBackupJson = useCallback((): string => {
+    const activeProj = projects.find((p) => p.id === activeProjectId) || projects[0];
+    const snapshot: ProjectRecord = {
+      ...activeProj,
+      assumptions,
+      savedScenarios,
+      activeScenarioId,
+      auditLog,
+      pestelAnalysis,
+      kpiNotes,
+      scenarioVoiceNotes,
+      dashboardReportNotes,
+      updatedAt: new Date().toISOString(),
+    };
+    return JSON.stringify(
+      {
+        backupType: 'riz-madagascar-full-project-backup',
+        schemaVersion: '6.0',
+        exportedAt: new Date().toISOString(),
+        analystName,
+        project: snapshot,
+      },
+      null,
+      2
+    );
+  }, [
+    projects,
+    activeProjectId,
+    assumptions,
+    savedScenarios,
+    activeScenarioId,
+    auditLog,
+    pestelAnalysis,
+    kpiNotes,
+    scenarioVoiceNotes,
+    dashboardReportNotes,
+    analystName,
+  ]);
+
+  const importFullBackupJson = useCallback(
+    (jsonStr: string): boolean => {
+      try {
+        const parsed = JSON.parse(jsonStr);
+        const candidateProject: ProjectRecord | null =
+          parsed?.project && isValidAssumptionsShape(parsed.project.assumptions)
+            ? parsed.project
+            : parsed && isValidAssumptionsShape(parsed.assumptions)
+            ? {
+                id: `backup-${Date.now()}`,
+                name: parsed.name || `Sauvegarde importée (${new Date().toLocaleDateString('fr-FR')})`,
+                description:
+                  parsed.description || 'Projet restauré depuis une sauvegarde complète JSON.',
+                source: 'copy',
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                assumptions: parsed.assumptions,
+                savedScenarios:
+                  Array.isArray(parsed.savedScenarios) && parsed.savedScenarios.length > 0
+                    ? parsed.savedScenarios
+                    : [
+                        {
+                          id: `sc-${Date.now()}`,
+                          name: 'Base Restaurée',
+                          description: 'Hypothèses restaurées depuis sauvegarde JSON',
+                          assumptions: parsed.assumptions,
+                          createdAt: new Date().toISOString(),
+                        },
+                      ],
+                activeScenarioId: parsed.activeScenarioId || '',
+                auditLog: Array.isArray(parsed.auditLog) ? parsed.auditLog : [],
+                pestelAnalysis: parsed.pestelAnalysis || createDefaultPestelAnalysis(),
+                kpiNotes: Array.isArray(parsed.kpiNotes) ? parsed.kpiNotes : [],
+                scenarioVoiceNotes: Array.isArray(parsed.scenarioVoiceNotes)
+                  ? parsed.scenarioVoiceNotes
+                  : [],
+                dashboardReportNotes:
+                  typeof parsed.dashboardReportNotes === 'string'
+                    ? parsed.dashboardReportNotes
+                    : '',
+              }
+            : null;
+
+        if (!candidateProject) {
+          notify('error', 'Fichier de sauvegarde invalide : hypothèses introuvables.');
+          return false;
+        }
+
+        const now = new Date().toISOString();
+        const existingIdx = projects.findIndex((p) => p.id === candidateProject.id);
+        const restoredId =
+          existingIdx >= 0 && candidateProject.id === DEFAULT_PROJECT_ID
+            ? DEFAULT_PROJECT_ID
+            : candidateProject.id || `backup-${Date.now()}`;
+
+        const normalizedProject: ProjectRecord = {
+          ...candidateProject,
+          id: restoredId,
+          updatedAt: now,
+          savedScenarios:
+            Array.isArray(candidateProject.savedScenarios) &&
+            candidateProject.savedScenarios.length > 0
+              ? candidateProject.savedScenarios
+              : [
+                  {
+                    id: `sc-${Date.now()}`,
+                    name: 'Base Restaurée',
+                    description: 'Scénario principal restauré',
+                    assumptions: candidateProject.assumptions,
+                    createdAt: now,
+                  },
+                ],
+        };
+        if (
+          !normalizedProject.activeScenarioId ||
+          !normalizedProject.savedScenarios.some((s) => s.id === normalizedProject.activeScenarioId)
+        ) {
+          normalizedProject.activeScenarioId = normalizedProject.savedScenarios[0].id;
+        }
+
+        skipProjectSyncRef.current = true;
+        setProjects((prev) => {
+          const idx = prev.findIndex((p) => p.id === normalizedProject.id);
+          if (idx >= 0) {
+            return prev.map((p, i) => (i === idx ? normalizedProject : p));
+          }
+          return [...prev, normalizedProject];
+        });
+        setActiveProjectId(normalizedProject.id);
+        setAssumptions(JSON.parse(JSON.stringify(normalizedProject.assumptions)));
+        setSavedScenarios(JSON.parse(JSON.stringify(normalizedProject.savedScenarios)));
+        setActiveScenarioId(normalizedProject.activeScenarioId);
+        setAuditLog(JSON.parse(JSON.stringify(normalizedProject.auditLog || [])));
+        setPestelAnalysis(
+          JSON.parse(
+            JSON.stringify(normalizedProject.pestelAnalysis || createDefaultPestelAnalysis())
+          )
+        );
+        setKpiNotes(JSON.parse(JSON.stringify(normalizedProject.kpiNotes || [])));
+        setScenarioVoiceNotes(
+          JSON.parse(JSON.stringify(normalizedProject.scenarioVoiceNotes || []))
+        );
+        setDashboardReportNotes(normalizedProject.dashboardReportNotes || '');
+        notify('success', `Sauvegarde « ${normalizedProject.name} » restaurée avec succès.`);
+        return true;
+      } catch (err) {
+        console.error('Erreur restauration sauvegarde JSON:', err);
+        notify('error', 'Impossible de parser le fichier de sauvegarde JSON.');
+        return false;
+      }
+    },
+    [projects, notify]
+  );
+
+  // Firebase Cloud Auth & Firestore Sync
+  const [cloudUser, setCloudUser] = useState<User | null>(null);
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<
+    'offline' | 'syncing' | 'synced' | 'error'
+  >('offline');
+  const lastCloudDigestRef = useRef<string>('');
+
+  useEffect(() => {
+    const unsubscribe = subscribeFirebaseAuth((user) => {
+      setCloudUser(user);
+      if (!user) {
+        setCloudSyncStatus('offline');
+      }
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    if (!cloudUser) return;
+    void syncUserProfileToFirestore(cloudUser, analystName).catch((err) => {
+      console.error('Erreur profil Firestore:', err);
+    });
+
+    const unsubProjects = subscribeUserProjectsFromFirestore(cloudUser.uid, (remoteProjects) => {
+      if (!remoteProjects || remoteProjects.length === 0) return;
+      setProjects((prev) => {
+        const merged = [...prev];
+        for (const remote of remoteProjects) {
+          const idx = merged.findIndex((p) => p.id === remote.id);
+          if (idx < 0) {
+            merged.push(remote);
+          } else {
+            const localTime = new Date(merged[idx].updatedAt || 0).getTime();
+            const remoteTime = new Date(remote.updatedAt || 0).getTime();
+            if (remoteTime > localTime + 2000 && merged[idx].id !== activeProjectId) {
+              merged[idx] = remote;
+            }
+          }
+        }
+        return merged;
+      });
+      setCloudSyncStatus('synced');
+    });
+
+    return () => {
+      unsubProjects();
+    };
+  }, [cloudUser, analystName, activeProjectId]);
+
+  const syncActiveProjectToCloud = useCallback(async () => {
+    if (!cloudUser) return;
+    const target = projects.find((p) => p.id === activeProjectId) || projects[0];
+    if (!target) return;
+    const payload: ProjectRecord = {
+      ...target,
+      assumptions,
+      savedScenarios,
+      activeScenarioId,
+      pestelAnalysis,
+      dashboardReportNotes,
+      updatedAt: new Date().toISOString(),
+    };
+    try {
+      setCloudSyncStatus('syncing');
+      await saveProjectToFirestore(cloudUser.uid, payload);
+      lastCloudDigestRef.current = JSON.stringify({
+        id: payload.id,
+        assumptions: payload.assumptions,
+        savedScenarios: payload.savedScenarios,
+        dashboardReportNotes: payload.dashboardReportNotes,
+      });
+      setCloudSyncStatus('synced');
+    } catch (err) {
+      console.error('Erreur sync Firestore:', err);
+      setCloudSyncStatus('error');
+      notify('error', 'Synchronisation Cloud Firestore échouée.');
+    }
+  }, [
+    cloudUser,
+    projects,
+    activeProjectId,
+    assumptions,
+    savedScenarios,
+    activeScenarioId,
+    pestelAnalysis,
+    dashboardReportNotes,
+    notify,
+  ]);
+
+  // Debounced automatic Firestore sync when signed in
+  useEffect(() => {
+    if (!cloudUser) return;
+    const digest = JSON.stringify({
+      id: activeProjectId,
+      assumptions,
+      savedScenarios,
+      dashboardReportNotes,
+    });
+    if (digest === lastCloudDigestRef.current) return;
+
+    const timer = window.setTimeout(() => {
+      void syncActiveProjectToCloud();
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [
+    cloudUser,
+    activeProjectId,
+    assumptions,
+    savedScenarios,
+    dashboardReportNotes,
+    syncActiveProjectToCloud,
+  ]);
+
+  const signInCloud = useCallback(async () => {
+    try {
+      setCloudSyncStatus('syncing');
+      const user = await signInWithGoogleCloud();
+      setCloudUser(user);
+      await syncUserProfileToFirestore(user, analystName);
+      notify('success', `Connecté au Cloud sous ${user.email || user.displayName || 'Google'}.`);
+    } catch (err) {
+      console.error('Erreur connexion Google Cloud:', err);
+      setCloudSyncStatus('error');
+      notify('error', 'Connexion Cloud annulée ou refusée.');
+    }
+  }, [analystName, notify]);
+
+  const signOutCloud = useCallback(async () => {
+    try {
+      await signOutFirebaseCloud();
+      setCloudUser(null);
+      setCloudSyncStatus('offline');
+      notify('info', 'Déconnecté de la synchronisation Cloud Firestore.');
+    } catch (err) {
+      console.error('Erreur déconnexion Cloud:', err);
+      notify('error', 'Impossible de se déconnecter pour le moment.');
+    }
+  }, [notify]);
+
   // Excel Export
   const handleExportToExcel = () => {
     try {
@@ -2978,9 +3386,14 @@ export const FinancialProvider: React.FC<{ children: ReactNode }> = ({ children 
         setDashboardReportNotes(fallback.dashboardReportNotes || '');
       }
       setProjects(remaining);
+      if (cloudUser) {
+        void deleteProjectFromFirestore(projectId).catch((err) => {
+          console.error('Erreur suppression Firestore:', err);
+        });
+      }
       notify('info', `Projet « ${target.name} » supprimé.`);
     },
-    [projects, activeProjectId, notify]
+    [projects, activeProjectId, cloudUser, notify]
   );
 
   const updatePestelCategory = useCallback(
@@ -3255,6 +3668,8 @@ export const FinancialProvider: React.FC<{ children: ReactNode }> = ({ children 
         updateCommunalTaxes,
         updateStockManagement,
         updateFixedAssets,
+        updateHumanResources,
+        updateRiskAnalysis,
         updateKpiThresholds,
         updateVariableCostPerKg,
         addVariableCostPerKg,
@@ -3276,10 +3691,17 @@ export const FinancialProvider: React.FC<{ children: ReactNode }> = ({ children 
         resetToDefaults,
         exportToJson,
         importFromJson,
+        exportFullBackupJson,
+        importFullBackupJson,
         exportToExcel: handleExportToExcel,
         exportProjectionsToCsv: handleExportProjectionsToCsv,
         exportFiveYearProjectionsToCsv: handleExportFiveYearProjectionsToCsv,
         exportSeasonalIncomeStatementToCsv: handleExportSeasonalIncomeStatementToCsv,
+        cloudUser,
+        cloudSyncStatus,
+        signInCloud,
+        signOutCloud,
+        syncActiveProjectToCloud,
         projects,
         activeProject,
         activeProjectId,

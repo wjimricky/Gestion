@@ -76,6 +76,16 @@ export const ScenariosTab: React.FC<ScenariosTabProps> = ({ onOpenScenarioManage
           real: formatAriary(realiste.annualTotalCostsAr, { inMillions: inM }),
           opt: formatAriary(optimiste.annualTotalCostsAr, { inMillions: inM }),
         },
+        ...(assumptions.riskAnalysis?.enabled && assumptions.riskAnalysis?.integrateIntoScenarios
+          ? [
+              {
+                label: 'Perte espérée (Risques op.)',
+                pess: `−${formatAriary(pessimiste.expectedRiskLossAr ?? 0, { inMillions: inM })}`,
+                real: `−${formatAriary(realiste.expectedRiskLossAr ?? 0, { inMillions: inM })}`,
+                opt: `−${formatAriary(optimiste.expectedRiskLossAr ?? 0, { inMillions: inM })}`,
+              },
+            ]
+          : []),
         {
           label: 'Résultat net avant IR',
           pess: formatAriary(pessimiste.annualNetBeforeTaxAr, { inMillions: inM }),
@@ -175,6 +185,35 @@ export const ScenariosTab: React.FC<ScenariosTabProps> = ({ onOpenScenarioManage
           )}
         </div>
       </div>
+
+      {/* Active Risk Expected Loss Integration Banner */}
+      {assumptions.riskAnalysis?.enabled && assumptions.riskAnalysis?.integrateIntoScenarios && (
+        <div
+          role="status"
+          className="p-3.5 rounded-xl border border-rose-500/35 bg-rose-500/[0.06] text-xs text-zinc-800 dark:text-zinc-200 flex flex-wrap items-center justify-between gap-2"
+        >
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" aria-hidden="true" />
+            <span>
+              <strong>Perte espérée des risques opérationnels intégrée</strong> dans les résultats :{' '}
+              <span className="font-mono font-bold text-amber-700 dark:text-amber-400">
+                Pessimiste −{formatAriary(pessimiste.expectedRiskLossAr ?? 0, { inMillions: true })}
+              </span>
+              {' · '}
+              <span className="font-mono font-bold text-rose-700 dark:text-rose-400">
+                Réaliste −{formatAriary(realiste.expectedRiskLossAr ?? 0, { inMillions: true })}
+              </span>
+              {' · '}
+              <span className="font-mono font-bold text-teal-700 dark:text-teal-400">
+                Optimiste −{formatAriary(optimiste.expectedRiskLossAr ?? 0, { inMillions: true })}
+              </span>
+            </span>
+          </div>
+          <span className="text-[11px] font-mono text-zinc-500 dark:text-zinc-400">
+            Réglage : Hypothèses → Module 17
+          </span>
+        </div>
+      )}
 
       {/* Mode Discussion : Notes vocales Web Speech attachées au plan de financement */}
       {discussionModeOpen && <ScenarioDiscussionMode />}
@@ -448,8 +487,29 @@ export const ScenariosTab: React.FC<ScenariosTabProps> = ({ onOpenScenarioManage
                   {formatAriary(realiste.annualTotalCostsAr, { inMillions: inM })}
                 </td>
                 <td className="py-2.5 px-4 text-right text-red-700 dark:text-red-400">{formatAriary(optimiste.annualTotalCostsAr, { inMillions: inM })}</td>
-                <td className="py-2.5 px-4 font-sans text-zinc-600 dark:text-zinc-400">Achats + charges fixes</td>
+                <td className="py-2.5 px-4 font-sans text-zinc-600 dark:text-zinc-400">
+                  Achats + charges fixes{assumptions.riskAnalysis?.integrateIntoScenarios ? ' + perte espérée' : ''}
+                </td>
               </tr>
+              {assumptions.riskAnalysis?.enabled && assumptions.riskAnalysis?.integrateIntoScenarios && (
+                <tr className="bg-rose-500/[0.04]">
+                  <td className="py-2.5 px-4 font-sans text-rose-800 dark:text-rose-300 font-medium">
+                    Dont perte espérée (Risques op.)
+                  </td>
+                  <td className="py-2.5 px-4 text-right text-rose-700 dark:text-rose-400 font-semibold">
+                    −{formatAriary(pessimiste.expectedRiskLossAr ?? 0, { inMillions: inM })}
+                  </td>
+                  <td className="py-2.5 px-4 text-right text-rose-700 dark:text-rose-400 font-semibold bg-emerald-500/5">
+                    −{formatAriary(realiste.expectedRiskLossAr ?? 0, { inMillions: inM })}
+                  </td>
+                  <td className="py-2.5 px-4 text-right text-rose-700 dark:text-rose-400 font-semibold">
+                    −{formatAriary(optimiste.expectedRiskLossAr ?? 0, { inMillions: inM })}
+                  </td>
+                  <td className="py-2.5 px-4 font-sans text-zinc-600 dark:text-zinc-400">
+                    Σ (pᵢ × Impactᵢ) pondérée par scénario
+                  </td>
+                </tr>
+              )}
               <tr className="font-bold">
                 <td className="py-2.5 px-4 font-sans text-zinc-900 dark:text-zinc-100">Résultat net avant IR</td>
                 <td className="py-2.5 px-4 text-right text-amber-700 dark:text-amber-400">{formatAriary(pessimiste.annualNetBeforeTaxAr, { inMillions: inM })}</td>

@@ -285,6 +285,13 @@ export function getResolvedClimateImpact(
     coefficientAggregationMode:
       existing?.coefficientAggregationMode ?? 'expected_probability',
     customCoefficients: existing?.customCoefficients ?? DEFAULT_CLIMATE_COEFFICIENTS,
+    fiveYearVulnerability: {
+      cycloneAnnualProbPct: existing?.fiveYearVulnerability?.cycloneAnnualProbPct ?? 28,
+      droughtAnnualProbPct: existing?.fiveYearVulnerability?.droughtAnnualProbPct ?? 35,
+      floodAnnualProbPct: existing?.fiveYearVulnerability?.floodAnnualProbPct ?? 20,
+      safetyReserveTargetMonths:
+        existing?.fiveYearVulnerability?.safetyReserveTargetMonths ?? 2.5,
+    },
   };
 }
 
@@ -439,3 +446,106 @@ export function computeClimateSimulationPreview(
     effectiveMillingDeltaPoints: shocks.effectiveAverageMillingDeltaPoints,
   };
 }
+
+export interface FiveYearClimateResiliencePoint {
+  year: 1 | 2 | 3 | 4 | 5;
+  label: string;
+  cumulativeHazardProbPct: number;
+  expectedTurnoverShockAr: number;
+  nominalAnnualCashBufferAr: number;
+  recommendedSafetyTreasuryAr: number;
+  reserveGapAr: number;
+}
+
+export interface FiveYearClimateVulnerabilitySummary {
+  annualCombinedEventProbPct: number;
+  fiveYearAnyEventProbPct: number;
+  baselineSafetyReserveAr: number;
+  recommendedPeakSafetyReserveAr: number;
+  additionalBufferNeededAr: number;
+  points: FiveYearClimateResiliencePoint[];
+}
+
+export function computeFiveYearClimateVulnerability(
+  assumptions: FinancialAssumptions,
+  climate: ClimateImpactAssumptions,
+  baseAnnualTurnoverAr: number,
+  monthlyFixedChargesAr: number,
+  bfrPerRotationHSAr: number
+): FiveYearClimateVulnerabilitySummary {
+  const vuln = climate.fiveYearVulnerability ?? {
+    cycloneAnnualProbPct: 28,
+    droughtAnnualProbPct: 35,
+    floodAnnualProbPct: 20,
+    safetyReserveTargetMonths: 2.5,
+  };
+
+  const pCyclone = Math.max(0, Math.min(1, vuln.cycloneAnnualProbPct / 100));
+  const pDrought = Math.max(0, Math.min(1, vuln.droughtAnnualProbPct / 100));
+  const pFlood = Math.max(0, Math.min(1, vuln.floodAnnualProbPct / 100));
+
+  const pSafeYear = (1 - pCyclone) * (1 - pDrought) * (1 - pFlood);
+  const annualCombinedProb = Math.max(0, Math.min(1, 1 - pSafeYear));
+  const fiveYearAnyEventProb = 1 - Math.pow(1 - annualCombinedProb, 5);
+
+  // Expected weighted shock on turnover per hazard type
+  const expectedAnnualLossRatio =
+    pCyclone * 0.35 + pDrought * 0.25 + pFlood * 0.18;
+  const baselineSafetyReserveAr = Math.round(assumptions.investment.cashBufferAr);
+  const growth2 = assumptions.growthRateYear2 || 0.25;
+  const growth3 = assumptions.growthRateYear3 || 0.25;
+
+  const points: FiveYearClimateResiliencePoint[] = ([1, 2, 3, 4, 5] as const).map(
+    (yr) => {
+      const cumProb = 1 - Math.pow(1 - annualCombinedProb, yr);
+      const scaleFactor =
+        yr === 1
+          ? 1
+          : yr === 2
+          ? 1 + growth2 * 0.45
+          : 1 + growth2 * 0.45 + growth3 * (yr - 2) * 0.25;
+
+      const projTurnover = baseAnnualTurnoverAr * scaleFactor;
+      const expectedTurnoverShockAr = Math.round(
+        projTurnover * expectedAnnualLossRatio * (0.65 + cumProb * 0.35)
+      );
+      const baseBufferNeeded =
+        monthlyFixedChargesAr * vuln.safetyReserveTargetMonths +
+        bfrPerRotationHSAr * 0.5;
+      const climateContingency = expectedTurnoverShockAr * 0.38;
+      const recommendedSafetyTreasuryAr = Math.round(
+        (baseBufferNeeded + climateContingency) * (1 + (yr - 1) * 0.06)
+      );
+
+      return {
+        year: yr,
+        label: `Année ${yr}`,
+        cumulativeHazardProbPct: Number((cumProb * 100).toFixed(1)),
+        expectedTurnoverShockAr,
+        nominalAnnualCashBufferAr: baselineSafetyReserveAr,
+        recommendedSafetyTreasuryAr,
+        reserveGapAr: Math.max(
+          0,
+          recommendedSafetyTreasuryAr - baselineSafetyReserveAr
+        ),
+      };
+    }
+  );
+
+  const recommendedPeakSafetyReserveAr = Math.max(
+    ...points.map((p) => p.recommendedSafetyTreasuryAr)
+  );
+
+  return {
+    annualCombinedEventProbPct: Number((annualCombinedProb * 100).toFixed(1)),
+    fiveYearAnyEventProbPct: Number((fiveYearAnyEventProb * 100).toFixed(1)),
+    baselineSafetyReserveAr,
+    recommendedPeakSafetyReserveAr,
+    additionalBufferNeededAr: Math.max(
+      0,
+      recommendedPeakSafetyReserveAr - baselineSafetyReserveAr
+    ),
+    points,
+  };
+}
+

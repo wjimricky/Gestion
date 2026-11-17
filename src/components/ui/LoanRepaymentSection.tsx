@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   AlertTriangle,
   Wallet,
+  Leaf,
 } from 'lucide-react';
 import {
   Bar,
@@ -26,10 +27,12 @@ import { useFinancial } from '../../context/FinancialContext';
 import {
   AgriculturalLoanParams,
   computeLoanRepaymentPlan,
+  computeSustainableLoanComparison,
   DEFAULT_LOAN_PARAMS,
   LoanAmortizationMethod,
   LoanPaymentFrequency,
   MALAGASY_AG_LOAN_PRESETS,
+  SUSTAINABLE_FINANCING_PROGRAMS,
 } from '../../utils/loanRepayment';
 import { formatAriary, formatPercent } from '../../utils/formatters';
 import { FormField } from './FormField';
@@ -46,6 +49,14 @@ export const LoanRepaymentSection: React.FC = () => {
   const chartCardRef = useRef<HTMLDivElement>(null);
 
   const summary = useMemo(() => computeLoanRepaymentPlan(params, model), [params, model]);
+
+  const sustainableComparisons = useMemo(
+    () =>
+      SUSTAINABLE_FINANCING_PROGRAMS.map((program) =>
+        computeSustainableLoanComparison(params, model, program)
+      ),
+    [params, model]
+  );
 
   const applyPreset = (presetId: (typeof MALAGASY_AG_LOAN_PRESETS)[number]['id']) => {
     const preset = MALAGASY_AG_LOAN_PRESETS.find((p) => p.id === presetId);
@@ -632,6 +643,88 @@ export const LoanRepaymentSection: React.FC = () => {
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* Financement Durable & Prêts Bonifiés Éco-Responsables */}
+      <div className="p-4 rounded-xl border border-emerald-500/35 bg-emerald-500/[0.04] dark:bg-emerald-950/20 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-start gap-2">
+            <Leaf className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0" aria-hidden="true" />
+            <div>
+              <h3 className="text-xs sm:text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                Financement Durable — Prêts Bonifiés Pratiques Éco-Responsables
+              </h3>
+              <p className="text-[11px] text-zinc-600 dark:text-zinc-400">
+                Compare l’économie annuelle d’intérêts et la prime verte obtenue face à votre crédit standard ({params.annualInterestRatePct.toFixed(1)} %/an).
+              </p>
+            </div>
+          </div>
+          <span className="text-[11px] font-mono text-emerald-700 dark:text-emerald-300">
+            Base comparée : {formatAriary(params.principalAr, { inMillions: true })}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+          {sustainableComparisons.map((item) => (
+            <div
+              key={item.program.id}
+              className="p-3.5 rounded-xl border border-emerald-500/30 bg-white dark:bg-[#11101C] space-y-2.5 flex flex-col justify-between"
+            >
+              <div className="space-y-1.5">
+                <div className="flex items-start justify-between gap-2">
+                  <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
+                    {item.program.shortLabel}
+                  </span>
+                  <span className="text-[11px] font-mono font-bold tabular-nums text-emerald-700 dark:text-emerald-300 shrink-0">
+                    {item.program.subsidizedRatePct.toFixed(1)} %/an
+                  </span>
+                </div>
+                <p className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-snug">
+                  {item.program.practiceDescription}
+                </p>
+                <div className="text-[10px] font-mono text-zinc-500">
+                  {item.program.donorReference} · Prime verte {item.program.ecoGrantBonusPct} %
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800/80 space-y-1 text-xs font-mono tabular-nums">
+                <div className="flex justify-between">
+                  <span className="font-sans text-zinc-600 dark:text-zinc-400">Économie intérêts / an :</span>
+                  <span className="font-bold text-emerald-700 dark:text-emerald-300">
+                    +{formatAriary(item.annualInterestSavingsAr, { inMillions: inM })}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="font-sans text-zinc-600 dark:text-zinc-400">Bonus subvention verte :</span>
+                  <span>+{formatAriary(item.ecoBonusValueAr, { inMillions: inM })}</span>
+                </div>
+                <div className="flex justify-between pt-1 border-t border-zinc-100 dark:border-zinc-800/60 font-bold">
+                  <span className="font-sans text-zinc-800 dark:text-zinc-200">Gain total financement :</span>
+                  <span className="text-teal-700 dark:text-teal-300">
+                    +{formatAriary(item.totalFinancingGainAr, { inMillions: inM })}
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setParams((prev) => ({
+                    ...prev,
+                    presetId: 'custom',
+                    loanName: item.program.label,
+                    institutionLabel: item.program.donorReference,
+                    annualInterestRatePct: item.program.subsidizedRatePct,
+                    processingFeePct: item.program.feePct,
+                  }))
+                }
+                className="w-full min-h-9 px-3 py-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-xs font-semibold text-emerald-900 dark:text-emerald-200 transition-colors"
+              >
+                Simuler ce taux ({item.program.subsidizedRatePct.toFixed(1)} %)
+              </button>
+            </div>
+          ))}
         </div>
       </div>
 

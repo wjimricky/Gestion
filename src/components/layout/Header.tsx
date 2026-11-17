@@ -19,6 +19,10 @@ import {
   FileUp,
   Settings,
   SlidersHorizontal,
+  Sparkles,
+  Cloud,
+  CloudOff,
+  RefreshCw,
 } from 'lucide-react';
 import { PWAInstallButton } from '../ui/PWAInstallButton';
 import { ThemeToggle } from '../ui/ThemeToggle';
@@ -39,6 +43,10 @@ interface HeaderProps {
   onOpenCommandPalette: () => void;
   onStartTour: () => void;
   onOpenGoogleSheetsExport?: () => void;
+  onExportExecutiveMarkdown?: () => void;
+  onExportStructuredCoopJson?: () => void;
+  onOpenGeminiDrawer?: () => void;
+  onOpenChartExportModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -56,6 +64,10 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenCommandPalette,
   onStartTour,
   onOpenGoogleSheetsExport,
+  onExportExecutiveMarkdown,
+  onExportStructuredCoopJson,
+  onOpenGeminiDrawer,
+  onOpenChartExportModal,
 }) => {
   const {
     projects,
@@ -75,6 +87,10 @@ export const Header: React.FC<HeaderProps> = ({
     importFromJson,
     validation,
     notify,
+    cloudUser,
+    cloudSyncStatus,
+    signInCloud,
+    syncActiveProjectToCloud,
   } = useFinancial();
 
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
@@ -350,10 +366,65 @@ export const Header: React.FC<HeaderProps> = ({
                 onExportCsv5Y={exportFiveYearProjectionsToCsv}
                 onExportCsv3Y={exportProjectionsToCsv}
                 onExportJson={handleDownloadJson}
+                onExportExecutiveMarkdown={onExportExecutiveMarkdown}
+                onExportStructuredCoopJson={onExportStructuredCoopJson}
                 onExportGoogleSheets={onOpenGoogleSheetsExport}
+                onOpenChartExportModal={onOpenChartExportModal}
                 variant="header"
               />
             </div>
+
+            {onOpenGeminiDrawer && (
+              <button
+                type="button"
+                onClick={onOpenGeminiDrawer}
+                title="Ouvrir le Conseiller Financier IA (analyse VAN, TRI, soudure & corridors)"
+                aria-label="Ouvrir le Conseiller Financier IA"
+                className="hidden sm:inline-flex min-h-10 px-2.5 items-center justify-center gap-1.5 rounded-xl border border-indigo-500/35 bg-indigo-500/10 hover:bg-indigo-500/20 text-xs font-semibold text-indigo-800 dark:text-indigo-200 transition-colors whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/70"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" aria-hidden="true" />
+                <span className="hidden xl:inline">Conseiller IA</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                if (!cloudUser) {
+                  void signInCloud();
+                } else {
+                  void syncActiveProjectToCloud();
+                }
+              }}
+              title={
+                cloudUser
+                  ? `Cloud Sync (${cloudUser.email || 'connecté'}) — Cliquer pour synchroniser`
+                  : 'Se connecter avec Google pour activer la synchronisation Cloud'
+              }
+              aria-label={cloudUser ? 'Synchroniser avec le Cloud' : 'Connexion Cloud Google'}
+              className={`hidden md:inline-flex min-h-10 px-2.5 items-center justify-center gap-1.5 rounded-xl border text-xs font-semibold transition-colors whitespace-nowrap focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/70 ${
+                cloudUser
+                  ? cloudSyncStatus === 'error'
+                    ? 'border-rose-500/40 bg-rose-500/10 text-rose-800 dark:text-rose-300'
+                    : 'border-emerald-500/35 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-500/15'
+                  : 'border-zinc-300 dark:border-white/[0.1] bg-zinc-50 dark:bg-[#141323] text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-[#1D1B31]'
+              }`}
+            >
+              {cloudSyncStatus === 'syncing' ? (
+                <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" aria-hidden="true" />
+              ) : cloudUser ? (
+                <Cloud className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+              ) : (
+                <CloudOff className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+              )}
+              <span className="hidden 2xl:inline">
+                {cloudUser
+                  ? cloudSyncStatus === 'syncing'
+                    ? 'Synchro…'
+                    : 'Cloud OK'
+                  : 'Cloud'}
+              </span>
+            </button>
 
             {/* JSON Import */}
             <button

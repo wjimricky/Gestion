@@ -25,6 +25,9 @@ import {
   FileText,
   Upload,
   SlidersHorizontal,
+  Sparkles,
+  FileJson,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { NAV_ITEMS } from '../layout/navItems';
 import { useFinancial } from '../../context/FinancialContext';
@@ -71,7 +74,11 @@ interface CommandPaletteModalProps {
   onExportCsv5Y?: () => void;
   onExportJson: () => void;
   onImportJson?: () => void;
+  onExportExecutiveMarkdown?: () => void;
+  onExportStructuredCoopJson?: () => void;
+  onOpenGeminiDrawer?: () => void;
   onExportGoogleSheets?: () => void;
+  onOpenChartExportModal?: () => void;
   onPrintReport: () => void;
   theme: 'dark' | 'light';
   onToggleTheme: () => void;
@@ -102,7 +109,11 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
   onExportCsv5Y,
   onExportJson,
   onImportJson,
+  onExportExecutiveMarkdown,
+  onExportStructuredCoopJson,
+  onOpenGeminiDrawer,
   onExportGoogleSheets,
+  onOpenChartExportModal,
   onPrintReport,
   theme,
   onToggleTheme,
@@ -319,6 +330,22 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
             },
           ]
         : []),
+      ...(onOpenChartExportModal
+        ? [
+            {
+              id: 'action-export-charts-img',
+              group: 'Actions rapides' as const,
+              label: 'Exporter les graphiques du Dashboard (PNG / SVG)',
+              description: 'Télécharger chaque graphique individuellement pour PowerPoint',
+              keywords: 'exporter graphique image png svg powerpoint chart dashboard',
+              icon: ImageIcon,
+              onSelect: () => {
+                onClose();
+                window.setTimeout(() => onOpenChartExportModal(), 60);
+              },
+            },
+          ]
+        : []),
       {
         id: 'action-csv',
         group: 'Actions rapides',
@@ -376,6 +403,54 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
           window.setTimeout(() => onPrintReport(), 100);
         },
       },
+      ...(onExportExecutiveMarkdown
+        ? [
+            {
+              id: 'action-export-exec-md',
+              group: 'Actions rapides' as const,
+              label: 'Exporter Executive Summary (.md)',
+              description: 'Matrice décisionnelle VAN, TRI, Payback pour investisseurs',
+              keywords: 'exporter executive summary markdown md investisseurs matrice decision',
+              icon: FileText,
+              onSelect: () => {
+                onClose();
+                onExportExecutiveMarkdown();
+              },
+            },
+          ]
+        : []),
+      ...(onExportStructuredCoopJson
+        ? [
+            {
+              id: 'action-export-coop-json',
+              group: 'Actions rapides' as const,
+              label: 'Exporter JSON structuré Coopératives (.json)',
+              description: 'Format normalisé pour intégration outils coopératives agricoles',
+              keywords: 'exporter json structure cooperatives normalisation integration',
+              icon: FileJson,
+              onSelect: () => {
+                onClose();
+                onExportStructuredCoopJson();
+              },
+            },
+          ]
+        : []),
+      ...(onOpenGeminiDrawer
+        ? [
+            {
+              id: 'action-open-gemini-advisor',
+              group: 'Actions rapides' as const,
+              label: 'Ouvrir le Conseiller Financier IA',
+              description: 'Analyser VAN, TRI, trésorerie de soudure et corridors rizicoles',
+              keywords: 'ia conseiller financier analyse gemini assistant recommandations',
+              icon: Sparkles,
+              onSelect: () => {
+                onClose();
+                onOpenGeminiDrawer();
+              },
+            },
+          ]
+        : []),
       {
         id: 'action-json',
         group: 'Actions rapides',
@@ -470,14 +545,18 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
     onClose,
     onExportCsv,
     onExportCsv5Y,
+    onExportDocx,
     onExportExcel,
+    onExportExecutiveMarkdown,
     onExportGoogleSheets,
     onExportJson,
     onExportPdf,
-    onOpenCustomPdfModal,
     onExportSeasonalCsv,
+    onExportStructuredCoopJson,
     onImportJson,
+    onOpenCustomPdfModal,
     onOpenExcelImport,
+    onOpenGeminiDrawer,
     onOpenGlossary,
     onOpenProjectComparator,
     onOpenProjectManager,

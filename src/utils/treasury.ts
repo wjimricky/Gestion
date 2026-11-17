@@ -36,6 +36,7 @@ export type TreasuryRiskLevel = 'optimal' | 'vigilance' | 'critique';
 export interface TreasurySimulationSettings {
   startMonthIndex: number; // 0..11, default 4 (Mai: début Haute Saison à Madagascar)
   clientDsoDays: 0 | 15 | 30 | 45; // Délai d'encaissement clients simulé
+  supplierDpoDays?: 0 | 15 | 30; // Délai de paiement fournisseurs (paddy & usinage)
   soudurePrestockRatio: number; // 0 to 0.50: constitution de stock paddy HS pour sécuriser la soudure
   creditLineAr: number; // Ligne de trésorerie / découvert court terme autorisé
 }
@@ -43,6 +44,7 @@ export interface TreasurySimulationSettings {
 export const DEFAULT_TREASURY_SETTINGS: TreasurySimulationSettings = {
   startMonthIndex: 4, // Mai
   clientDsoDays: 0,
+  supplierDpoDays: 0,
   soudurePrestockRatio: 0,
   creditLineAr: 0,
 };
@@ -64,6 +66,9 @@ export interface MonthlyTreasuryRow {
   variableOutflowsAr: number;
   fixedOutflowsAr: number;
   taxOutflowsAr: number;
+  vatCashAdjustmentAr: number; // + crédit récupéré / - TVA rémanente & décaissement net
+  vatCreditCarriedAr: number;
+  vatPayableDgiAr: number;
   prestockOutflowAr: number;
   totalOutflowsAr: number;
   netMonthlyCashFlowAr: number;
@@ -102,6 +107,8 @@ export interface TreasuryPlanSummary {
   totalLogisticsOutflowsAr: number;
   totalFixedOutflowsAr: number;
   totalTaxOutflowsAr: number;
+  totalVatNetDgiAr: number;
+  vatApplied: boolean;
   netAnnualCashFlowAr: number;
 }
 
@@ -180,8 +187,15 @@ export function buildMonthlyTreasuryPlan(
     rawMonthlyRiceShares.push(m < hsMonths ? hsRiceTurnoverShare : bsRiceTurnoverShare);
   }
 
-  // DSO lag ratio (0, 0.5, 1.0, 1.5 months)
+  // DSO lag ratio (0, 0.5, 1.0, 1.5 months) & Supplier DPO lag ratio (0, 0.5, 1.0 months)
   const lagMonths = settings.clientDsoDays / 30;
+  const dpoLagMonths = (settings.supplierDpoDays ?? 0) / 30;
+  const rawSupplierOutflows: number[] = [];
+  for (let m = 0; m < totalMonths; m++) {
+    rawSupplierOutflows.push(
+      m < hsMonths ? hsOutSplit.paddyMonthly : bsOutSplit.paddyMonthly
+    );
+  }
 
   // Optional strategic prestock during last 2 HS months released into Soudure months
   const prestockMonthsWindow = Math.min(2, hsMonths);
@@ -242,16 +256,36 @@ export function buildMonthlyTreasuryPlan(
       ? -monthlyPrestockRelease
       : 0;
 
-    const paddyPurchaseOutflowAr = Math.max(0, outSplit.paddyMonthly + prestockOutflowAr);
+    let basePaddyOut = outSplit.paddyMonthly;
+    if (dpoLagMonths > 0) {
+      const wholeDpo = Math.floor(dpoLagMonths);
+      const fracDpo = dpoLagMonths - wholeDpo;
+      const prevA = m - wholeDpo >= 0 ? rawSupplierOutflows[m - wholeDpo] : 0;
+      const prevB = m - wholeDpo - 1 >= 0 ? rawSupplierOutflows[m - wholeDpo - 1] : 0;
+      basePaddyOut = prevA * (1 - fracDpo) + prevB * fracDpo;
+    }
+
+    const paddyPurchaseOutflowAr = Math.max(0, basePaddyOut + prestockOutflowAr);
     const millingAndBagsOutflowAr = outSplit.millingBagsMonthly;
     const rotationLogisticsOutflowAr = outSplit.logisticsRotMonthly;
-    const variableOutflowsAr = Math.max(0, baseVarOut + prestockOutflowAr);
+    const dpoShiftDelta = basePaddyOut - outSplit.paddyMonthly;
+    const variableOutflowsAr = Math.max(0, baseVarOut + prestockOutflowAr + dpoShiftDelta);
     const fixedOutflowsAr = monthlyFixed;
 
     const monthlyBeforeTax = (isHS ? hs.monthlyNetResultBeforeTaxAr : bs.monthlyNetResultBeforeTaxAr);
     const taxOutflowsAr = monthlyBeforeTax > 0 ? monthlyBeforeTax * taxRate : 0;
-    const totalOutflowsAr = variableOutflowsAr + fixedOutflowsAr + taxOutflowsAr;
-    const netMonthlyCashFlowAr = inflowsAr - totalOutflowsAr;
+
+    // Optional VAT cash integration (when VAT is enabled & applied to financial statements / cash flow)
+    const vatEntry = model.year1.vatActive
+      ? model.vatSummary?.monthlySchedule[m % 12]
+      : undefined;
+    const vatCashAdjustmentAr = vatEntry ? vatEntry.vatCashImpactAr : 0;
+    const vatOutflowDrag = vatCashAdjustmentAr < 0 ? Math.abs(vatCashAdjustmentAr) : 0;
+    const vatInflowCredit = vatCashAdjustmentAr > 0 ? vatCashAdjustmentAr : 0;
+
+    const effectiveInflowsAr = inflowsAr + vatInflowCredit;
+    const totalOutflowsAr = variableOutflowsAr + fixedOutflowsAr + taxOutflowsAr + vatOutflowDrag;
+    const netMonthlyCashFlowAr = effectiveInflowsAr - totalOutflowsAr;
 
     const openingCashAr = runningCash;
     const endingCashAr = openingCashAr + netMonthlyCashFlowAr;
@@ -304,13 +338,16 @@ export function buildMonthlyTreasuryPlan(
       openingCashAr,
       riceSalesInflowAr,
       byproductSalesInflowAr,
-      inflowsAr,
+      inflowsAr: effectiveInflowsAr,
       paddyPurchaseOutflowAr,
       millingAndBagsOutflowAr,
       rotationLogisticsOutflowAr,
       variableOutflowsAr,
       fixedOutflowsAr,
       taxOutflowsAr,
+      vatCashAdjustmentAr,
+      vatCreditCarriedAr: vatEntry?.creditTvaReporteAr ?? 0,
+      vatPayableDgiAr: vatEntry?.tvaNetteAPayerAr ?? 0,
       prestockOutflowAr,
       totalOutflowsAr,
       netMonthlyCashFlowAr,
@@ -360,6 +397,7 @@ export function buildMonthlyTreasuryPlan(
   const totalLogisticsOutflowsAr = rows.reduce((s, r) => s + r.rotationLogisticsOutflowAr, 0);
   const totalFixedOutflowsAr = rows.reduce((s, r) => s + r.fixedOutflowsAr, 0);
   const totalTaxOutflowsAr = rows.reduce((s, r) => s + r.taxOutflowsAr, 0);
+  const totalVatNetDgiAr = rows.reduce((s, r) => s + r.vatPayableDgiAr, 0);
   const netAnnualCashFlowAr = totalInflowsAr - totalOutflowsAr;
 
   return {
@@ -388,35 +426,39 @@ export function buildMonthlyTreasuryPlan(
     totalLogisticsOutflowsAr,
     totalFixedOutflowsAr,
     totalTaxOutflowsAr,
+    totalVatNetDgiAr,
+    vatApplied: Boolean(model.year1.vatActive),
     netAnnualCashFlowAr,
   };
 }
 
 export function exportTreasuryCsv(summary: TreasuryPlanSummary): void {
   const sep = ';';
-  const lines: string[] = [
-    [
-      'Mois_Num',
-      'Calendrier',
-      'Phase',
-      'Tresorerie_Debut_Ar',
-      'Ventes_Riz_Ar',
-      'Ventes_Sous_Produits_Ar',
-      'Total_Entrees_Ar',
-      'Achats_Paddy_Ar',
-      'Usinage_et_Sacs_Ar',
-      'Logistique_Rotations_Ar',
-      'Charges_Fixes_Ar',
-      'Impots_IR_Ar',
-      'Total_Sorties_Ar',
-      'Flux_Net_Mensuel_Ar',
-      'BFR_Rotation_Ar',
-      'Point_Bas_Intra_Mensuel_Ar',
-      'Tresorerie_Fin_Mois_Ar',
-      'Jours_Couverture_BFR',
-      'Niveau_Risque',
-    ].join(sep),
+  const baseHeaders = [
+    'Mois_Num',
+    'Calendrier',
+    'Phase',
+    'Tresorerie_Debut_Ar',
+    'Ventes_Riz_Ar',
+    'Ventes_Sous_Produits_Ar',
+    'Total_Entrees_Ar',
+    'Achats_Paddy_Ar',
+    'Usinage_et_Sacs_Ar',
+    'Logistique_Rotations_Ar',
+    'Charges_Fixes_Ar',
+    'Impots_IR_Ar',
+    ...(summary.vatApplied
+      ? ['Impact_Cash_TVA_Ar', 'Credit_TVA_Reporte_Ar', 'TVA_Nette_DGI_Ar']
+      : []),
+    'Total_Sorties_Ar',
+    'Flux_Net_Mensuel_Ar',
+    'BFR_Rotation_Ar',
+    'Point_Bas_Intra_Mensuel_Ar',
+    'Tresorerie_Fin_Mois_Ar',
+    'Jours_Couverture_BFR',
+    'Niveau_Risque',
   ];
+  const lines: string[] = [baseHeaders.join(sep)];
 
   for (const row of summary.rows) {
     lines.push(
@@ -433,6 +475,13 @@ export function exportTreasuryCsv(summary: TreasuryPlanSummary): void {
         row.rotationLogisticsOutflowAr.toFixed(0),
         row.fixedOutflowsAr.toFixed(0),
         row.taxOutflowsAr.toFixed(0),
+        ...(summary.vatApplied
+          ? [
+              row.vatCashAdjustmentAr.toFixed(0),
+              row.vatCreditCarriedAr.toFixed(0),
+              row.vatPayableDgiAr.toFixed(0),
+            ]
+          : []),
         row.totalOutflowsAr.toFixed(0),
         row.netMonthlyCashFlowAr.toFixed(0),
         row.bfrPerRotationAr.toFixed(0),

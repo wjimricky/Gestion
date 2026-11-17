@@ -22,6 +22,8 @@ import { LoanRepaymentSection } from '../ui/LoanRepaymentSection';
 import { MadagascarVatCalculatorSection } from '../ui/MadagascarVatCalculatorSection';
 import { CommunalTaxesSection } from '../ui/CommunalTaxesSection';
 import { FixedAssetsSection } from '../ui/FixedAssetsSection';
+import { HumanResourcesSection } from '../ui/HumanResourcesSection';
+import { RiskAnalysisSection } from '../ui/RiskAnalysisSection';
 import { getResolvedKpiThresholds, getResolvedLogistics } from '../../utils/logistics';
 import {
   Plus,
@@ -1804,6 +1806,12 @@ export const HypothesesTab: React.FC = () => {
 
       {/* 15. Gestion des Actifs Immobilisés & Dotations aux Amortissements */}
       <FixedAssetsSection />
+
+      {/* 16. Planification des Ressources Humaines saisonnières */}
+      <HumanResourcesSection />
+
+      {/* 17. Analyse des Risques Opérationnels & Perte Espérée */}
+      <RiskAnalysisSection />
 
       {/* Audit de Conformité (Standards Filière Riz Madagascar) */}
       <ComplianceAuditSection />

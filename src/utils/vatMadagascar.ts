@@ -1,9 +1,14 @@
 import {
   FinancialAssumptions,
-  FullFinancialModel,
+  PaybackResult,
+  SeasonResult,
   VatAssumptions,
+  VatMonthlyEntry,
   VatRegime,
   VatRiceOutputMode,
+  VatSeasonBreakdown,
+  VatSimulationResult,
+  Year1Result,
 } from '../types/finance';
 
 export const MADAGASCAR_VAT_THRESHOLD_AR = 400_000_000; // Seuil d'assujettissement TVA CGI Madagascar (400 M Ar CA annuel)
@@ -11,8 +16,11 @@ export const MADAGASCAR_VAT_THRESHOLD_AR = 400_000_000; // Seuil d'assujettissem
 export const DEFAULT_VAT_ASSUMPTIONS: VatAssumptions = {
   enabled: false,
   applyToCashFlow: false,
+  applyToFinancialStatements: false,
   regime: 'exonere_agricole',
   vatRate: 0.2,
+  inputVatRate: 0.2,
+  outputVatRate: 0.2,
   riceOutputMode: 'exonere_ppn',
   taxableRiceSharePct: 35,
   byproductTaxable: false,
@@ -40,6 +48,8 @@ export const MADAGASCAR_VAT_PRESETS: VatPresetOption[] = [
     patch: {
       regime: 'exonere_agricole',
       vatRate: 0.2,
+      inputVatRate: 0.2,
+      outputVatRate: 0.0,
       riceOutputMode: 'exonere_ppn',
       taxableRiceSharePct: 0,
       byproductTaxable: false,
@@ -58,6 +68,8 @@ export const MADAGASCAR_VAT_PRESETS: VatPresetOption[] = [
     patch: {
       regime: 'assujetti_reel',
       vatRate: 0.2,
+      inputVatRate: 0.2,
+      outputVatRate: 0.2,
       riceOutputMode: 'assujetti_20',
       taxableRiceSharePct: 100,
       byproductTaxable: true,
@@ -76,6 +88,8 @@ export const MADAGASCAR_VAT_PRESETS: VatPresetOption[] = [
     patch: {
       regime: 'assujetti_reel',
       vatRate: 0.2,
+      inputVatRate: 0.2,
+      outputVatRate: 0.2,
       riceOutputMode: 'mixte_b2b',
       taxableRiceSharePct: 40,
       byproductTaxable: true,
@@ -95,62 +109,30 @@ export const VAT_REGIME_LABELS: Record<VatRegime, string> = {
 
 export const VAT_OUTPUT_MODE_LABELS: Record<VatRiceOutputMode, string> = {
   exonere_ppn: '0 % Exonéré (Produit agricole / PPN)',
-  assujetti_20: '20 % Assujetti (Riz usiné conditionné / B2B)',
+  assujetti_20: 'Assujetti (Riz usiné conditionné / B2B)',
   mixte_b2b: 'Mixte (% B2B assujetti + % local exonéré)',
 };
 
-export interface VatSeasonBreakdown {
-  season: 'HS' | 'BS';
-  months: number;
-  turnoverHtAr: number;
-  taxableTurnoverAr: number;
-  tvaCollecteeAr: number;
-  taxableInputsHtAr: number;
-  tvaBruteSurIntrantsAr: number;
-  tvaDeductibleOpexAr: number;
-  tvaRemanenteOpexAr: number;
-}
-
-export interface VatMonthlyEntry {
-  month: number;
-  label: string;
-  period: 'HS' | 'BS';
-  tvaCollecteeAr: number;
-  tvaDeductibleAr: number;
-  tvaRemanenteAr: number;
-  tvaNetteAPayerAr: number;
-  creditTvaReporteAr: number;
-  cashFlowBeforeVatAr: number;
-  vatCashImpactAr: number; // negative = net cash outflow due to VAT/remnant VAT, positive = VAT refund/shield
-  cashFlowAfterVatAr: number;
-}
-
-export interface VatSimulationResult {
-  settings: VatAssumptions;
-  isAssujetti: boolean;
-  prorataDeduction: number; // 0..1
-  hauteSaison: VatSeasonBreakdown;
-  basseSaison: VatSeasonBreakdown;
-  annualTvaCollecteeAr: number;
-  annualTvaDeductibleOpexAr: number;
-  capexTvaBruteAr: number;
-  capexTvaDeductibleAr: number;
-  capexTvaRemanenteAr: number;
-  annualTvaRemanenteNonDeductibleAr: number;
-  annualTvaNetteVerseeDgiAr: number;
-  yearEndCreditTvaAr: number;
-  year1CashFlowBeforeVatAr: number;
-  year1VatCashImpactAr: number;
-  year1CashFlowAfterVatAr: number;
-  dgiThresholdExceeded: boolean;
-  dgiThresholdWarning: string | null;
-  monthlySchedule: VatMonthlyEntry[];
-}
+export type { VatSeasonBreakdown, VatMonthlyEntry, VatSimulationResult };
 
 export function getResolvedVatAssumptions(assumptions: FinancialAssumptions): VatAssumptions {
-  return {
+  const merged = {
     ...DEFAULT_VAT_ASSUMPTIONS,
     ...(assumptions.vatSettings || {}),
+  };
+  const fallbackRate = Math.max(0, Number(merged.vatRate) || 0);
+  return {
+    ...merged,
+    inputVatRate:
+      typeof merged.inputVatRate === 'number' && Number.isFinite(merged.inputVatRate)
+        ? Math.max(0, merged.inputVatRate)
+        : fallbackRate,
+    outputVatRate:
+      typeof merged.outputVatRate === 'number' && Number.isFinite(merged.outputVatRate)
+        ? Math.max(0, merged.outputVatRate)
+        : fallbackRate,
+    applyToFinancialStatements:
+      merged.applyToFinancialStatements ?? merged.applyToCashFlow ?? false,
   };
 }
 
@@ -161,11 +143,19 @@ function getEffectiveTaxableShare(settings: VatAssumptions): number {
   return Math.max(0, Math.min(100, settings.taxableRiceSharePct)) / 100;
 }
 
+export interface VatModelInputs {
+  hauteSaison: SeasonResult;
+  basseSaison: SeasonResult;
+  year1: Year1Result;
+  payback?: PaybackResult;
+}
+
 function computeSeasonInputsBreakdown(
   assumptions: FinancialAssumptions,
-  model: FullFinancialModel,
+  model: VatModelInputs,
   seasonKey: 'hauteSaison' | 'basseSaison',
-  settings: VatAssumptions
+  settings: VatAssumptions,
+  inputVatRate: number
 ) {
   const seasonAssump = assumptions[seasonKey];
   const seasonRes = model[seasonKey];
@@ -173,7 +163,7 @@ function computeSeasonInputsBreakdown(
   const totalPaddyKg = Math.max(0, seasonRes.totalPaddyKg);
 
   // Paddy brut acheté aux producteurs est exonéré à 0 % (CGI Madagascar)
-  // Les prestations de décorticage/usinage (autres coûts/kg hors paddy) et les sacs d'emballage sont taxables à 20 % si formel
+  // Les prestations de décorticage/usinage (autres coûts/kg hors paddy) et les sacs d'emballage sont taxables au taux intrants si formel
   const millingPerKg = assumptions.costsPerKgPaddy
     .filter((c) => c.id !== 'cost-paddy')
     .reduce((acc, c) => acc + Math.max(0, seasonKey === 'hauteSaison' ? c.costHS : c.costBS), 0);
@@ -199,18 +189,17 @@ function computeSeasonInputsBreakdown(
   const taxableFixedShare = Math.max(0, Math.min(100, settings.fixedChargesTaxableSharePct)) / 100;
   const taxableFixedAr = seasonFixedAr * taxableFixedShare;
 
-  const vatRate = Math.max(0, settings.vatRate);
   const fuelQuota = Math.max(0, Math.min(100, settings.fuelVatDeductibleQuotaPct)) / 100;
 
   const millingAndBagsBaseAr = settings.millingAndBagsVatApplicable
     ? millingTotalAr + bagsTotalAr
     : 0;
 
-  // TVA facturée par les fournisseurs formels sur intrants & services
-  const tvaFuelBruteAr = fuelRotationTotalAr * vatRate;
-  const tvaMillingBagsBruteAr = millingAndBagsBaseAr * vatRate;
-  const tvaOtherRotBruteAr = otherRotationTotalAr * 0.5 * vatRate; // ~50% facturé avec TVA formelle
-  const tvaFixedBruteAr = taxableFixedAr * vatRate;
+  // TVA facturée par les fournisseurs formels sur intrants & services au taux TVA intrants
+  const tvaFuelBruteAr = fuelRotationTotalAr * inputVatRate;
+  const tvaMillingBagsBruteAr = millingAndBagsBaseAr * inputVatRate;
+  const tvaOtherRotBruteAr = otherRotationTotalAr * 0.5 * inputVatRate; // ~50% facturé avec TVA formelle
+  const tvaFixedBruteAr = taxableFixedAr * inputVatRate;
 
   const tvaBruteSurIntrantsAr =
     tvaFuelBruteAr + tvaMillingBagsBruteAr + tvaOtherRotBruteAr + tvaFixedBruteAr;
@@ -233,12 +222,16 @@ function computeSeasonInputsBreakdown(
 
 export function computeMadagascarVatSimulation(
   assumptions: FinancialAssumptions,
-  model: FullFinancialModel,
+  model: VatModelInputs,
   overrideSettings?: VatAssumptions
 ): VatSimulationResult {
   const settings = overrideSettings ?? getResolvedVatAssumptions(assumptions);
-  const vatRate = Math.max(0, settings.vatRate);
-  const isAssujetti = settings.regime === 'assujetti_reel' && settings.riceOutputMode !== 'exonere_ppn';
+  const inputVatRate = Math.max(0, settings.inputVatRate ?? settings.vatRate);
+  const outputVatRate = Math.max(0, settings.outputVatRate ?? settings.vatRate);
+  const isAssujetti =
+    settings.regime === 'assujetti_reel' &&
+    settings.riceOutputMode !== 'exonere_ppn' &&
+    outputVatRate > 0;
 
   const riceTaxableShare = getEffectiveTaxableShare(settings);
 
@@ -262,23 +255,35 @@ export function computeMadagascarVatSimulation(
 
   // Prorata de déduction CGI = CA taxable / CA total (1.0 si 100% taxable, 0 si non assujetti)
   const prorataDeduction =
-    settings.regime === 'assujetti_reel' && totalTaxableTurnover > 0
+    settings.regime === 'assujetti_reel' && totalTaxableTurnover > 0 && outputVatRate > 0
       ? Math.min(1, totalTaxableTurnover / totalTurnover)
       : 0;
 
-  const hsInputs = computeSeasonInputsBreakdown(assumptions, model, 'hauteSaison', settings);
-  const bsInputs = computeSeasonInputsBreakdown(assumptions, model, 'basseSaison', settings);
+  const hsInputs = computeSeasonInputsBreakdown(
+    assumptions,
+    model,
+    'hauteSaison',
+    settings,
+    inputVatRate
+  );
+  const bsInputs = computeSeasonInputsBreakdown(
+    assumptions,
+    model,
+    'basseSaison',
+    settings,
+    inputVatRate
+  );
 
-  const hsTvaCollectee = hsTaxableTurnover * vatRate;
+  const hsTvaCollectee = hsTaxableTurnover * outputVatRate;
   const hsTvaDeductible = hsInputs.tvaEligibleQuotaAr * prorataDeduction;
   const hsTvaRemanente = Math.max(0, hsInputs.tvaBruteSurIntrantsAr - hsTvaDeductible);
 
-  const bsTvaCollectee = bsTaxableTurnover * vatRate;
+  const bsTvaCollectee = bsTaxableTurnover * outputVatRate;
   const bsTvaDeductible = bsInputs.tvaEligibleQuotaAr * prorataDeduction;
   const bsTvaRemanente = Math.max(0, bsInputs.tvaBruteSurIntrantsAr - bsTvaDeductible);
 
-  // CAPEX Matériel TVA
-  const capexTvaBruteAr = assumptions.investment.materielAr * vatRate;
+  // CAPEX Matériel TVA (taux intrants/équipement)
+  const capexTvaBruteAr = assumptions.investment.materielAr * inputVatRate;
   const capexTvaDeductibleAr =
     settings.regime === 'assujetti_reel' && settings.capexVatRecoverable && prorataDeduction > 0
       ? capexTvaBruteAr * prorataDeduction
@@ -293,7 +298,7 @@ export function computeMadagascarVatSimulation(
   let totalTvaVerseeDgi = 0;
 
   const monthlySchedule: VatMonthlyEntry[] = [];
-  const baseYear1Monthly = model.payback.monthlyCashFlows.slice(0, 12);
+  const baseYear1Monthly = model.payback ? model.payback.monthlyCashFlows.slice(0, 12) : [];
 
   for (let m = 1; m <= 12; m++) {
     const isHs = m <= hsMonths;
@@ -314,21 +319,15 @@ export function computeMadagascarVatSimulation(
 
     totalTvaVerseeDgi += monthTvaAPayer;
 
-    const baseCf = baseYear1Monthly[m - 1]?.netCashFlowAfterTaxAr ?? model.year1.netResultAfterTaxAr / 12;
-    // Impact sur le flux de trésorerie net réel :
-    // - Si assujetti : la TVA collectée auprès du client est neutre économiquement (encaisée puis reversée),
-    //   mais le crédit de TVA initial sur CAPEX réduit les sorties réelles, tandis que la TVA rémanente non déductible
-    //   constitue une charge réelle supplémentaire (atténuée par l'économie d'IR).
-    // - Si exonéré : aucune TVA collectée, mais toute la TVA rémanente sur achats formels diminue la trésorerie.
-    const capexShieldThisMonth =
-      m === 1 ? 0 : 0;
-    void capexShieldThisMonth;
+    const baseCf =
+      baseYear1Monthly[m - 1]?.netCashFlowAfterTaxAr ?? model.year1.netResultAfterTaxAr / 12;
 
-    // Economic cash flow impact vs pure HT model:
-    // + Récupération crédit TVA CAPEX qui vient réduire la TVA due (monthDeductible + credit used vs collectee)
+    // Impact sur le flux de trésorerie net réel :
+    // + Récupération crédit TVA CAPEX qui vient réduire la TVA due (monthDeductible + crédit utilisé)
     // - TVA rémanente non récupérable sur intrants (coût net après économie IR)
     const vatCreditUsedThisMonth = Math.max(0, monthCollectee - monthDeductible - monthTvaAPayer);
-    const afterTaxRemnantDrag = monthRemanente * (1 - Math.max(0, Math.min(0.4, assumptions.corporateTaxRate)));
+    const afterTaxRemnantDrag =
+      monthRemanente * (1 - Math.max(0, Math.min(0.4, assumptions.corporateTaxRate)));
     const vatCashImpactAr = vatCreditUsedThisMonth - afterTaxRemnantDrag;
 
     monthlySchedule.push({
@@ -350,6 +349,13 @@ export function computeMadagascarVatSimulation(
   const annualTvaDeductibleOpexAr = hsTvaDeductible + bsTvaDeductible;
   const annualTvaRemanenteNonDeductibleAr = hsTvaRemanente + bsTvaRemanente + capexTvaRemanenteAr;
 
+  const avgMonthlyCreditTvaAr =
+    monthlySchedule.reduce((s, r) => s + r.creditTvaReporteAr, 0) /
+    Math.max(1, monthlySchedule.length);
+  const avgMonthlyVatPayableAr =
+    monthlySchedule.reduce((s, r) => s + r.tvaNetteAPayerAr, 0) /
+    Math.max(1, monthlySchedule.length);
+
   const year1CashFlowBeforeVatAr = model.year1.netResultAfterTaxAr;
   const year1VatCashImpactAr = monthlySchedule.reduce((s, r) => s + r.vatCashImpactAr, 0);
   const year1CashFlowAfterVatAr = year1CashFlowBeforeVatAr + year1VatCashImpactAr;
@@ -364,6 +370,8 @@ export function computeMadagascarVatSimulation(
 
   return {
     settings,
+    inputVatRate,
+    outputVatRate,
     isAssujetti,
     prorataDeduction,
     hauteSaison: {
@@ -396,6 +404,8 @@ export function computeMadagascarVatSimulation(
     annualTvaRemanenteNonDeductibleAr,
     annualTvaNetteVerseeDgiAr: totalTvaVerseeDgi,
     yearEndCreditTvaAr: creditCarryforward,
+    avgMonthlyCreditTvaAr,
+    avgMonthlyVatPayableAr,
     year1CashFlowBeforeVatAr,
     year1VatCashImpactAr,
     year1CashFlowAfterVatAr,

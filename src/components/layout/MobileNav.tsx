@@ -25,6 +25,9 @@ import {
   FolderKanban,
   FileUp,
   ChevronRight,
+  Sparkles,
+  FileJson,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { PWAInstallButton } from '../ui/PWAInstallButton';
 import { ThemeToggle } from '../ui/ThemeToggle';
@@ -42,6 +45,10 @@ interface MobileNavProps {
   onOpenCommandPalette: () => void;
   onStartTour: () => void;
   onOpenGoogleSheetsExport?: () => void;
+  onExportExecutiveMarkdown?: () => void;
+  onExportStructuredCoopJson?: () => void;
+  onOpenGeminiDrawer?: () => void;
+  onOpenChartExportModal?: () => void;
 }
 
 export const MobileNav: React.FC<MobileNavProps> = ({
@@ -57,6 +64,10 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   onOpenCommandPalette,
   onStartTour,
   onOpenGoogleSheetsExport,
+  onExportExecutiveMarkdown,
+  onExportStructuredCoopJson,
+  onOpenGeminiDrawer,
+  onOpenChartExportModal,
 }) => {
   const {
     projects,
@@ -399,6 +410,48 @@ export const MobileNav: React.FC<MobileNavProps> = ({
                 </button>
               )}
 
+              {onOpenChartExportModal && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDrawerOpen(false);
+                    onOpenChartExportModal();
+                  }}
+                  className={`col-span-2 ${actionBtnClass}`}
+                >
+                  <ImageIcon className="w-4 h-4 text-teal-600 dark:text-teal-400" aria-hidden="true" />
+                  <span>Graphiques Dashboard (PNG / SVG)</span>
+                </button>
+              )}
+
+              {onExportExecutiveMarkdown && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDrawerOpen(false);
+                    onExportExecutiveMarkdown();
+                  }}
+                  className={`col-span-2 ${actionBtnClass}`}
+                >
+                  <FileText className="w-4 h-4 text-indigo-600 dark:text-indigo-400" aria-hidden="true" />
+                  <span>Executive Summary (.md)</span>
+                </button>
+              )}
+
+              {onExportStructuredCoopJson && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDrawerOpen(false);
+                    onExportStructuredCoopJson();
+                  }}
+                  className={`col-span-2 ${actionBtnClass}`}
+                >
+                  <FileJson className="w-4 h-4 text-teal-600 dark:text-teal-400" aria-hidden="true" />
+                  <span>JSON structuré Coopératives (.json)</span>
+                </button>
+              )}
+
               {onOpenGoogleSheetsExport && (
                 <button
                   type="button"
@@ -424,6 +477,20 @@ export const MobileNav: React.FC<MobileNavProps> = ({
             />
 
             <div className="grid grid-cols-1 gap-2 mt-2">
+              {onOpenGeminiDrawer && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDrawerOpen(false);
+                    onOpenGeminiDrawer();
+                  }}
+                  className="w-full min-h-12 px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold inline-flex items-center justify-center gap-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                >
+                  <Sparkles className="w-4 h-4" aria-hidden="true" />
+                  <span>Conseiller Financier IA</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => {

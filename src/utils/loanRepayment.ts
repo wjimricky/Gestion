@@ -100,6 +100,127 @@ export const DEFAULT_LOAN_PARAMS: AgriculturalLoanParams = {
   ...MALAGASY_AG_LOAN_PRESETS[0].params,
 };
 
+export interface SustainableFinancingProgram {
+  id: 'irrigation_goutte' | 'agroecologie_sri' | 'sechage_solaire';
+  label: string;
+  shortLabel: string;
+  subsidizedRatePct: number;
+  feePct: number;
+  ecoGrantBonusPct: number; // % du principal subventionné / bonification verte
+  practiceDescription: string;
+  donorReference: string;
+}
+
+export const SUSTAINABLE_FINANCING_PROGRAMS: SustainableFinancingProgram[] = [
+  {
+    id: 'irrigation_goutte',
+    label: 'Crédit Vert — Irrigation Goutte-à-Goutte & Maîtrise Eau',
+    shortLabel: 'Irrigation Goutte-à-Goutte',
+    subsidizedRatePct: 8.5,
+    feePct: 0.5,
+    ecoGrantBonusPct: 10,
+    practiceDescription:
+      'Économie d’eau de 40 % et sécurisation du rendement en contre-saison sèche.',
+    donorReference: 'Ligne verte FIDA / AFD / BNI Eco-Agri',
+  },
+  {
+    id: 'agroecologie_sri',
+    label: 'Prêt Bonifié Agroécologie & SRI (Système Riziculture Intensive)',
+    shortLabel: 'Agroécologie & SRI',
+    subsidizedRatePct: 9.0,
+    feePct: 0.75,
+    ecoGrantBonusPct: 8,
+    practiceDescription:
+      'Repiquage précoce, compostage organique et réduction des engrais chimiques importés.',
+    donorReference: 'Facilités Climat / BOA Green Finance',
+  },
+  {
+    id: 'sechage_solaire',
+    label: 'Financement Durable — Séchage Solaire & Silos Hermétiques',
+    shortLabel: 'Séchage Solaire & Silos',
+    subsidizedRatePct: 9.5,
+    feePct: 0.75,
+    ecoGrantBonusPct: 12,
+    practiceDescription:
+      'Élimination des pertes post-récolte et baisse de l’empreinte énergétique de l’usinage.',
+    donorReference: 'Fonds Transition Énergétique Agro',
+  },
+];
+
+export interface SustainableLoanComparisonResult {
+  program: SustainableFinancingProgram;
+  standardAnnualInterestAvgAr: number;
+  sustainableAnnualInterestAvgAr: number;
+  annualInterestSavingsAr: number;
+  totalInterestSavingsAr: number;
+  totalFeeSavingsAr: number;
+  ecoBonusValueAr: number;
+  totalFinancingGainAr: number;
+  effectiveRateSpreadPct: number;
+  sustainableSummary: LoanRepaymentSummary;
+}
+
+export function computeSustainableLoanComparison(
+  standardParams: AgriculturalLoanParams,
+  model: FullFinancialModel,
+  program: SustainableFinancingProgram
+): SustainableLoanComparisonResult {
+  const standardSummary = computeLoanRepaymentPlan(standardParams, model);
+  const effectivePrincipal = Math.max(
+    0,
+    standardParams.principalAr * (1 - program.ecoGrantBonusPct / 100)
+  );
+  const sustainableParams: AgriculturalLoanParams = {
+    ...standardParams,
+    presetId: 'custom',
+    loanName: program.label,
+    institutionLabel: program.donorReference,
+    principalAr: Math.round(effectivePrincipal),
+    annualInterestRatePct: program.subsidizedRatePct,
+    processingFeePct: program.feePct,
+  };
+  const sustainableSummary = computeLoanRepaymentPlan(sustainableParams, model);
+
+  const years = Math.max(1, standardParams.durationMonths / 12);
+  const standardAnnualInterestAvgAr = Math.round(standardSummary.totalInterestAr / years);
+  const sustainableAnnualInterestAvgAr = Math.round(
+    sustainableSummary.totalInterestAr / years
+  );
+  const annualInterestSavingsAr = Math.max(
+    0,
+    standardAnnualInterestAvgAr - sustainableAnnualInterestAvgAr
+  );
+  const totalInterestSavingsAr = Math.max(
+    0,
+    standardSummary.totalInterestAr - sustainableSummary.totalInterestAr
+  );
+  const totalFeeSavingsAr = Math.max(
+    0,
+    standardSummary.processingFeeAr - sustainableSummary.processingFeeAr
+  );
+  const ecoBonusValueAr = Math.round(
+    Math.max(0, standardParams.principalAr - effectivePrincipal)
+  );
+  const totalFinancingGainAr =
+    totalInterestSavingsAr + totalFeeSavingsAr + ecoBonusValueAr;
+
+  return {
+    program,
+    standardAnnualInterestAvgAr,
+    sustainableAnnualInterestAvgAr,
+    annualInterestSavingsAr,
+    totalInterestSavingsAr,
+    totalFeeSavingsAr,
+    ecoBonusValueAr,
+    totalFinancingGainAr,
+    effectiveRateSpreadPct: Math.max(
+      0,
+      standardParams.annualInterestRatePct - program.subsidizedRatePct
+    ),
+    sustainableSummary,
+  };
+}
+
 export interface LoanScheduleRow {
   periodNumber: number;
   label: string;

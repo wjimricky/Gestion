@@ -6,6 +6,7 @@ import {
   FileJson,
   FileSpreadsheet,
   FileText,
+  Image as ImageIcon,
   SlidersHorizontal,
   Table,
 } from 'lucide-react';
@@ -27,7 +28,10 @@ interface ExportMenuProps {
   onExportCsv5Y: () => void;
   onExportCsv3Y: () => void;
   onExportJson: () => void;
+  onExportExecutiveMarkdown?: () => void;
+  onExportStructuredCoopJson?: () => void;
   onExportGoogleSheets?: () => void;
+  onOpenChartExportModal?: () => void;
   variant?: 'header' | 'dashboard';
 }
 
@@ -42,7 +46,10 @@ export const ExportMenu: React.FC<ExportMenuProps> = ({
   onExportCsv5Y,
   onExportCsv3Y,
   onExportJson,
+  onExportExecutiveMarkdown,
+  onExportStructuredCoopJson,
   onExportGoogleSheets,
+  onOpenChartExportModal,
   variant = 'header',
 }) => {
   const [open, setOpen] = useState(false);
@@ -271,6 +278,69 @@ export const ExportMenu: React.FC<ExportMenuProps> = ({
                   </div>
                   <div className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-snug mt-0.5">
                     Choix des sections : Tableau de bord, PESTEL, Sensibilité 2D
+                  </div>
+                </div>
+              </div>
+            </button>
+          )}
+
+          {onOpenChartExportModal && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => runAction(onOpenChartExportModal)}
+              className={`${MENU_ITEM_BASE_CLASSES} px-3 py-2 ${MENU_ITEM_STATE_CLASSES.idle}`}
+            >
+              <div className="flex items-start gap-2.5 min-w-0">
+                <ImageIcon className="w-4 h-4 text-teal-600 dark:text-teal-400 shrink-0 mt-0.5" aria-hidden="true" />
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                    Graphiques Dashboard (PNG / SVG)…
+                  </div>
+                  <div className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-snug mt-0.5">
+                    Export individuel haute résolution pour PowerPoint
+                  </div>
+                </div>
+              </div>
+            </button>
+          )}
+
+          {onExportExecutiveMarkdown && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => runAction(onExportExecutiveMarkdown)}
+              className={`${MENU_ITEM_BASE_CLASSES} px-3 py-2 ${MENU_ITEM_STATE_CLASSES.idle}`}
+            >
+              <div className="flex items-start gap-2.5 min-w-0">
+                <FileText className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" aria-hidden="true" />
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                    Executive Summary (.md)
+                  </div>
+                  <div className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-snug mt-0.5">
+                    Matrice décisionnelle VAN, TRI, Payback pour investisseurs
+                  </div>
+                </div>
+              </div>
+            </button>
+          )}
+
+          {onExportStructuredCoopJson && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => runAction(onExportStructuredCoopJson)}
+              className={`${MENU_ITEM_BASE_CLASSES} px-3 py-2 ${MENU_ITEM_STATE_CLASSES.idle}`}
+            >
+              <div className="flex items-start gap-2.5 min-w-0">
+                <FileJson className="w-4 h-4 text-teal-600 dark:text-teal-400 shrink-0 mt-0.5" aria-hidden="true" />
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                    JSON structuré Coopératives (.json)
+                  </div>
+                  <div className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-snug mt-0.5">
+                    Format normalisé intégration coopératives agricoles
                   </div>
                 </div>
               </div>

@@ -1,0 +1,164 @@
+{
+  "entities": {
+    "UserPublic": {
+      "title": "UserPublic",
+      "description": "Profil public minimal de l'analyste financier (sans données PII sensibles).",
+      "type": "object",
+      "properties": {
+        "displayName": {
+          "type": "string",
+          "description": "Nom affiché de l'utilisateur.",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "URL facultative de l'avatar utilisateur.",
+          "maxLength": 500
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Horodatage serveur de dernière mise à jour."
+        }
+      },
+      "required": ["displayName", "updatedAt"]
+    },
+    "UserPrivateProfile": {
+      "title": "UserPrivateProfile",
+      "description": "Données personnelles isolées (PII) de l'utilisateur authentifié.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Identifiant Firebase Auth de l'utilisateur.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Adresse e-mail vérifiée de l'utilisateur.",
+          "minLength": 3,
+          "maxLength": 200
+        },
+        "analystName": {
+          "type": "string",
+          "description": "Nom de l'analyste utilisé dans les rapports financiers.",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Horodatage serveur de mise à jour du profil privé."
+        }
+      },
+      "required": ["uid", "email", "analystName", "updatedAt"]
+    },
+    "RiceProject": {
+      "title": "RiceProject",
+      "description": "Modèle financier complet d'un projet rizicole à Madagascar (hypothèses, scénarios, PESTEL et notes).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Identifiant unique du projet.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "UID du propriétaire légitime du projet.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "description": "Nom du projet rizicole.",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "description": {
+          "type": "string",
+          "description": "Description synthétique du projet.",
+          "maxLength": 500
+        },
+        "source": {
+          "type": "string",
+          "enum": ["default", "excel", "copy"],
+          "description": "Origine du projet."
+        },
+        "activeScenarioId": {
+          "type": "string",
+          "description": "Identifiant du scénario actif.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "assumptions": {
+          "type": "object",
+          "description": "Structure native Firestore Map des hypothèses financières."
+        },
+        "savedScenarios": {
+          "type": "array",
+          "description": "Liste bornée des scénarios sauvegardés (max 25)."
+        },
+        "pestelAnalysis": {
+          "type": "object",
+          "description": "Matrice PESTEL structurée (Map native)."
+        },
+        "dashboardReportNotes": {
+          "type": "string",
+          "description": "Notes éditoriales incluses dans les exports PDF/Word.",
+          "maxLength": 10000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Horodatage serveur de création."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Horodatage serveur de dernière modification."
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "name",
+        "description",
+        "source",
+        "activeScenarioId",
+        "assumptions",
+        "savedScenarios",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/UserPublic"
+      },
+      "description": "Document profil public minimal de l'analyste (sans PII)."
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": {
+        "$ref": "#/entities/UserPrivateProfile"
+      },
+      "description": "Sous-collection PII strictement privée (profil email/uid réservé au propriétaire)."
+    },
+    "/projects/{projectId}": {
+      "schema": {
+        "$ref": "#/entities/RiceProject"
+      },
+      "description": "Projets financiers rizicoles de l'utilisateur synchronisés dans le cloud."
+    }
+  }
+}

@@ -10,10 +10,14 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import {
+  Area,
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
+  ComposedChart,
+  Line,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip as RechartsTooltip,
   XAxis,
@@ -24,6 +28,7 @@ import { ClimateHazardType } from '../../types/finance';
 import {
   CLIMATE_HAZARD_META,
   computeClimateSimulationPreview,
+  computeFiveYearClimateVulnerability,
   getResolvedClimateImpact,
 } from '../../utils/climate';
 import { formatAriary, formatKg, formatPercent } from '../../utils/formatters';
@@ -41,11 +46,42 @@ const HAZARD_ICONS: Record<ClimateHazardType, React.ComponentType<{ className?: 
 };
 
 export const ClimateImpactSection: React.FC = () => {
-  const { assumptions, validation, updateClimateImpact } = useFinancial();
+  const { assumptions, model, validation, updateClimateImpact, updateInvestmentField, notify } =
+    useFinancial();
   const climate = getResolvedClimateImpact(assumptions);
   const preview = useMemo(
     () => computeClimateSimulationPreview(assumptions, climate),
     [assumptions, climate]
+  );
+
+  const vulnSummary = useMemo(
+    () =>
+      computeFiveYearClimateVulnerability(
+        assumptions,
+        climate,
+        model.year1.totalTurnoverAr,
+        model.year1.monthlyFixedChargesAr,
+        model.investment.rotationWorkingCapitalHSAr
+      ),
+    [assumptions, climate, model]
+  );
+
+  const vuln = climate.fiveYearVulnerability ?? {
+    cycloneAnnualProbPct: 28,
+    droughtAnnualProbPct: 35,
+    floodAnnualProbPct: 20,
+    safetyReserveTargetMonths: 2.5,
+  };
+
+  const resilienceChartData = useMemo(
+    () =>
+      vulnSummary.points.map((pt) => ({
+        label: pt.label,
+        nominalMAr: Number((pt.nominalAnnualCashBufferAr / 1e6).toFixed(2)),
+        recommendedMAr: Number((pt.recommendedSafetyTreasuryAr / 1e6).toFixed(2)),
+        cumProbPct: pt.cumulativeHazardProbPct,
+      })),
+    [vulnSummary]
   );
 
   const hazardMeta = CLIMATE_HAZARD_META[climate.hazardType];
@@ -444,6 +480,254 @@ export const ClimateImpactSection: React.FC = () => {
               </Bar>
             </BarChart>
           </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* 5-Year Climate Vulnerability & Financial Resilience Chart */}
+      <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h3 className="text-xs sm:text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              Analyse de vulnérabilité climatique (5 ans) &amp; Graphique « Résilience Financière »
+            </h3>
+            <p className="text-[11px] text-zinc-600 dark:text-zinc-400">
+              Modélisez la probabilité annuelle d’événements extrêmes et dimensionnez la trésorerie de sécurité recommandée sur 5 ans.
+            </p>
+          </div>
+          {vulnSummary.additionalBufferNeededAr > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                updateInvestmentField('cashBufferAr', vulnSummary.recommendedPeakSafetyReserveAr);
+                notify(
+                  'success',
+                  `Cash Buffer porté à ${formatAriary(vulnSummary.recommendedPeakSafetyReserveAr, { inMillions: true })} pour couvrir le pic de risque climatique à 5 ans.`
+                );
+              }}
+              className="min-h-9 px-3 py-1.5 rounded-xl border border-sky-500/40 bg-sky-500/10 hover:bg-sky-500/20 text-xs font-semibold text-sky-900 dark:text-sky-200 transition-colors shrink-0"
+            >
+              Appliquer réserve pic ({formatAriary(vulnSummary.recommendedPeakSafetyReserveAr, { inMillions: true })})
+            </button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <FormField
+            label="Prob. Cyclone / an"
+            unit="% / an"
+            tooltip="Probabilité annuelle d'un épisode cyclonique affectant le bassin ou les routes."
+          >
+            {(props) => (
+              <input
+                {...props}
+                type="number"
+                min="0"
+                max="100"
+                step="1"
+                value={vuln.cycloneAnnualProbPct}
+                onChange={(e) =>
+                  updateClimateImpact({
+                    fiveYearVulnerability: {
+                      ...vuln,
+                      cycloneAnnualProbPct: Math.max(0, Math.min(100, Number(e.target.value) || 0)),
+                    },
+                  })
+                }
+              />
+            )}
+          </FormField>
+
+          <FormField
+            label="Prob. Sécheresse / an"
+            unit="% / an"
+            tooltip="Probabilité annuelle d'un déficit pluviométrique prolongé."
+          >
+            {(props) => (
+              <input
+                {...props}
+                type="number"
+                min="0"
+                max="100"
+                step="1"
+                value={vuln.droughtAnnualProbPct}
+                onChange={(e) =>
+                  updateClimateImpact({
+                    fiveYearVulnerability: {
+                      ...vuln,
+                      droughtAnnualProbPct: Math.max(0, Math.min(100, Number(e.target.value) || 0)),
+                    },
+                  })
+                }
+              />
+            )}
+          </FormField>
+
+          <FormField
+            label="Prob. Inondation / an"
+            unit="% / an"
+            tooltip="Probabilité annuelle de crue sur les périmètres bas ou pistes de collecte."
+          >
+            {(props) => (
+              <input
+                {...props}
+                type="number"
+                min="0"
+                max="100"
+                step="1"
+                value={vuln.floodAnnualProbPct}
+                onChange={(e) =>
+                  updateClimateImpact({
+                    fiveYearVulnerability: {
+                      ...vuln,
+                      floodAnnualProbPct: Math.max(0, Math.min(100, Number(e.target.value) || 0)),
+                    },
+                  })
+                }
+              />
+            )}
+          </FormField>
+
+          <FormField
+            label="Cible réserve fixe"
+            unit="mois charges"
+            tooltip="Couverture minimale de charges fixes intégrée à la trésorerie de sécurité."
+          >
+            {(props) => (
+              <input
+                {...props}
+                type="number"
+                min="0.5"
+                max="12"
+                step="0.5"
+                value={vuln.safetyReserveTargetMonths}
+                onChange={(e) =>
+                  updateClimateImpact({
+                    fiveYearVulnerability: {
+                      ...vuln,
+                      safetyReserveTargetMonths: Math.max(0.5, Math.min(12, Number(e.target.value) || 1)),
+                    },
+                  })
+                }
+              />
+            )}
+          </FormField>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="p-3 rounded-xl border border-zinc-200 dark:border-white/[0.08] bg-zinc-50/70 dark:bg-[#141322]">
+            <div className="text-[11px] text-zinc-600 dark:text-zinc-400">
+              Probabilité aléa (Année / 5 ans)
+            </div>
+            <div className="mt-1 text-base font-bold font-mono tabular-nums text-zinc-900 dark:text-white">
+              {vulnSummary.annualCombinedEventProbPct.toFixed(1)} %{' '}
+              <span className="text-xs font-normal text-zinc-500">
+                / {vulnSummary.fiveYearAnyEventProbPct.toFixed(1)} % sur 5 ans
+              </span>
+            </div>
+          </div>
+
+          <div className="p-3 rounded-xl border border-zinc-200 dark:border-white/[0.08] bg-zinc-50/70 dark:bg-[#141322]">
+            <div className="text-[11px] text-zinc-600 dark:text-zinc-400">
+              Trésorerie de sécurité recommandée (pic)
+            </div>
+            <div className="mt-1 text-base font-bold font-mono tabular-nums text-sky-700 dark:text-sky-300">
+              {formatAriary(vulnSummary.recommendedPeakSafetyReserveAr, { inMillions: true })}
+            </div>
+          </div>
+
+          <div className="p-3 rounded-xl border border-zinc-200 dark:border-white/[0.08] bg-zinc-50/70 dark:bg-[#141322]">
+            <div className="text-[11px] text-zinc-600 dark:text-zinc-400">
+              Complément vs Cash Buffer actuel
+            </div>
+            <div
+              className={`mt-1 text-base font-bold font-mono tabular-nums ${
+                vulnSummary.additionalBufferNeededAr > 0
+                  ? 'text-amber-700 dark:text-amber-300'
+                  : 'text-emerald-700 dark:text-emerald-300'
+              }`}
+            >
+              {vulnSummary.additionalBufferNeededAr > 0
+                ? `+${formatAriary(vulnSummary.additionalBufferNeededAr, { inMillions: true })}`
+                : 'Couvert'}
+            </div>
+          </div>
+        </div>
+
+        <div className="p-3.5 rounded-xl border border-zinc-200 dark:border-white/[0.08] bg-zinc-50/50 dark:bg-[#0D0C18] space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+              Résilience Financière — Besoin de trésorerie de sécurité vs Probabilité cumulée (5 ans)
+            </span>
+            <span className="text-[11px] font-mono text-zinc-500">
+              M Ar (gauche) · % risque cumulé (droite)
+            </span>
+          </div>
+          <div className="h-[220px] w-full min-w-0">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={resilienceChartData} margin={{ top: 8, right: 12, left: 0, bottom: 2 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.16)" vertical={false} />
+                <XAxis dataKey="label" tick={{ fill: '#94A3B8', fontSize: 11 }} />
+                <YAxis
+                  yAxisId="left"
+                  tick={{ fill: '#94A3B8', fontSize: 10 }}
+                  tickFormatter={(v) => `${v} M`}
+                  width={48}
+                />
+                <YAxis
+                  yAxisId="right"
+                  orientation="right"
+                  domain={[0, 100]}
+                  tick={{ fill: '#94A3B8', fontSize: 10 }}
+                  tickFormatter={(v) => `${v}%`}
+                  width={42}
+                />
+                <RechartsTooltip
+                  contentStyle={{
+                    backgroundColor: 'rgba(15, 14, 28, 0.94)',
+                    borderColor: 'rgba(255,255,255,0.12)',
+                    borderRadius: '10px',
+                    fontSize: '12px',
+                    color: '#F4F4F5',
+                  }}
+                />
+                <ReferenceLine
+                  yAxisId="left"
+                  y={Number((vulnSummary.baselineSafetyReserveAr / 1e6).toFixed(2))}
+                  stroke="#10b981"
+                  strokeDasharray="4 4"
+                />
+                <Area
+                  yAxisId="left"
+                  type="monotone"
+                  dataKey="recommendedMAr"
+                  name="Trésorerie sécurité recommandée (M Ar)"
+                  stroke="#0ea5e9"
+                  fill="#0ea5e9"
+                  fillOpacity={0.18}
+                  strokeWidth={2.5}
+                />
+                <Line
+                  yAxisId="left"
+                  type="monotone"
+                  dataKey="nominalMAr"
+                  name="Cash Buffer actuel (M Ar)"
+                  stroke="#10b981"
+                  strokeWidth={2}
+                  strokeDasharray="4 3"
+                  dot={false}
+                />
+                <Line
+                  yAxisId="right"
+                  type="monotone"
+                  dataKey="cumProbPct"
+                  name="Probabilité cumulée d’aléa (%)"
+                  stroke="#f59e0b"
+                  strokeWidth={2}
+                  dot={{ r: 3 }}
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
         </div>
       </div>
     </section>

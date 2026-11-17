@@ -81,21 +81,30 @@ export const MadagascarVatCalculatorSection: React.FC = () => {
           <button
             type="button"
             role="switch"
-            aria-checked={vatSettings.applyToCashFlow}
-            onClick={() =>
+            aria-checked={Boolean(
+              vatSettings.enabled &&
+                (vatSettings.applyToFinancialStatements || vatSettings.applyToCashFlow)
+            )}
+            onClick={() => {
+              const nextActive = !(
+                vatSettings.applyToFinancialStatements || vatSettings.applyToCashFlow
+              );
               updateVatSettings({
                 enabled: true,
-                applyToCashFlow: !vatSettings.applyToCashFlow,
-              })
-            }
+                applyToCashFlow: nextActive,
+                applyToFinancialStatements: nextActive,
+              });
+            }}
             className={`min-h-8 px-3 py-1 rounded-lg text-xs font-semibold border transition-colors ${
-              vatSettings.enabled && vatSettings.applyToCashFlow
+              vatSettings.enabled &&
+              (vatSettings.applyToFinancialStatements || vatSettings.applyToCashFlow)
                 ? 'border-teal-500/50 bg-teal-500/15 text-teal-800 dark:text-teal-300'
                 : 'border-zinc-200 dark:border-white/[0.1] bg-zinc-50 dark:bg-[#171627] text-zinc-700 dark:text-zinc-300'
             }`}
           >
-            {vatSettings.enabled && vatSettings.applyToCashFlow
-              ? 'Impact TVA appliqué au Cash Burn'
+            {vatSettings.enabled &&
+            (vatSettings.applyToFinancialStatements || vatSettings.applyToCashFlow)
+              ? 'TVA intégrée aux états financiers & trésorerie'
               : 'Mode simulation seule'}
           </button>
 
@@ -196,27 +205,57 @@ export const MadagascarVatCalculatorSection: React.FC = () => {
 
         <div className="space-y-1">
           <div className="flex justify-between">
-            <label htmlFor="vat-rate" className="font-semibold text-zinc-800 dark:text-zinc-200">
-              Taux TVA légal
+            <label htmlFor="vat-input-rate" className="font-semibold text-zinc-800 dark:text-zinc-200">
+              Taux TVA Intrants &amp; CAPEX
             </label>
             <span className="font-mono font-bold text-teal-700 dark:text-teal-400 tabular-nums">
-              {(vatSettings.vatRate * 100).toFixed(0)} %
+              {((vatSettings.inputVatRate ?? vatSettings.vatRate) * 100).toFixed(0)} %
             </span>
           </div>
           <input
-            id="vat-rate"
+            id="vat-input-rate"
             type="range"
             min={0}
             max={25}
             step={1}
-            value={Math.round(vatSettings.vatRate * 100)}
-            onChange={(e) =>
-              updateVatSettings({ enabled: true, vatRate: Number(e.target.value) / 100 })
-            }
+            value={Math.round((vatSettings.inputVatRate ?? vatSettings.vatRate) * 100)}
+            onChange={(e) => {
+              const rate = Number(e.target.value) / 100;
+              updateVatSettings({ enabled: true, inputVatRate: rate, vatRate: rate });
+            }}
             className="w-full accent-teal-600 cursor-pointer"
           />
           <span className="block text-[10px] text-zinc-500 dark:text-zinc-400">
-            Standard Madagascar : 20 % (Export : 0 %)
+            Carburant, sacs, usinage &amp; matériel (Standard : 20 %, paddy brut 0 %)
+          </span>
+        </div>
+
+        <div className="space-y-1">
+          <div className="flex justify-between">
+            <label htmlFor="vat-output-rate" className="font-semibold text-zinc-800 dark:text-zinc-200">
+              Taux TVA Produits Finis (Riz)
+            </label>
+            <span className="font-mono font-bold text-indigo-700 dark:text-indigo-400 tabular-nums">
+              {((vatSettings.outputVatRate ?? vatSettings.vatRate) * 100).toFixed(0)} %
+            </span>
+          </div>
+          <input
+            id="vat-output-rate"
+            type="range"
+            min={0}
+            max={25}
+            step={1}
+            value={Math.round((vatSettings.outputVatRate ?? vatSettings.vatRate) * 100)}
+            onChange={(e) =>
+              updateVatSettings({
+                enabled: true,
+                outputVatRate: Number(e.target.value) / 100,
+              })
+            }
+            className="w-full accent-indigo-600 cursor-pointer"
+          />
+          <span className="block text-[10px] text-zinc-500 dark:text-zinc-400">
+            Riz conditionné / B2B : 20 % · Export / PPN exonéré : 0 %
           </span>
         </div>
 
@@ -245,7 +284,7 @@ export const MadagascarVatCalculatorSection: React.FC = () => {
             className="w-full accent-teal-600 cursor-pointer"
           />
           <span className="block text-[10px] text-zinc-500 dark:text-zinc-400">
-            Paddy brut : toujours 0 % (exonéré)
+            Quote-part admise en déduction fiscale sur carburant
           </span>
         </div>
 

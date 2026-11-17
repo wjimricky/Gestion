@@ -154,15 +154,15 @@ export const FixedAssetsSection: React.FC = () => {
           <div>
             <div className="flex items-center gap-1.5">
               <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                15. Gestion des Actifs Immobilisés &amp; Dotations aux Amortissements
+                15. Calculateur de Dépréciation &amp; Gestion des Actifs Immobilisés
               </h2>
               <Tooltip
-                label="Amortissements & Impact Fiscal IR"
-                content="Inventoriez vos matériels agricoles et unités de décorticage, choisissez le mode linéaire ou dégressif fiscal (CGI Madagascar : coeff. 1,5 à 2,5), et simulez la dotation annuelle ainsi que l'économie d'impôt sur les sociétés (bouclier fiscal IR)."
+                label="Calculateur de Dépréciation & Impact Fiscal IR"
+                content="Inventoriez vos matériels agricoles et unités de décorticage, choisissez le mode linéaire ou dégressif fiscal (CGI Madagascar : coeff. 1,5 à 2,5), et automatisez la dotation annuelle ainsi que l'économie d'impôt sur les sociétés (bouclier fiscal IR)."
               />
             </div>
             <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">
-              Plan d’amortissement linéaire / dégressif du matériel agricole et des unités de décorticage, avec calcul du bouclier fiscal IR.
+              Plan d’amortissement linéaire / dégressif du matériel agricole et des unités de décorticage, avec automatisation de l’impact fiscal IR annuel.
             </p>
           </div>
         </div>

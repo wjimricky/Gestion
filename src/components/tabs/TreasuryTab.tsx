@@ -179,6 +179,11 @@ export const TreasuryTab: React.FC = () => {
               {summary.recommendedShortTermFacilityAr > 0
                 ? ` — Ligne de trésorerie recommandée : ${formatAriary(summary.recommendedShortTermFacilityAr, { inMillions: true })}.`
                 : '.'}
+              {summary.vatApplied && (
+                <span className="ml-1.5 text-teal-800 dark:text-teal-300 font-semibold">
+                  (TVA intégrée · DGI : {formatAriary(summary.totalVatNetDgiAr, { inMillions: true })})
+                </span>
+              )}
             </p>
           </div>
         </div>

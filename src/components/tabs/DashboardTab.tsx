@@ -28,6 +28,10 @@ import { EmailAlertsModal } from '../ui/EmailAlertsModal';
 import { EmailServiceStatusWidget } from '../ui/EmailServiceStatusWidget';
 import { OperationalCostDonutCard } from '../charts/OperationalCostDonutCard';
 import { ScenarioVsBaselineChartCard } from '../charts/ScenarioVsBaselineChartCard';
+import { ProfitLossWaterfallChart } from '../charts/ProfitLossWaterfallChart';
+import { PaddyStockOptimizationChartCard } from '../charts/PaddyStockOptimizationChartCard';
+import { CampaignCalendarCard } from '../ui/CampaignCalendarCard';
+import { GeneralLiquidityRatioCard } from '../ui/GeneralLiquidityRatioCard';
 import {
   buildAlertEmailDraft,
   buildBreachSignature,
@@ -72,6 +76,8 @@ import {
   BarChart3,
   BellRing,
   Mail,
+  Sparkles,
+  Receipt,
 } from 'lucide-react';
 import { MAPPING_TARGET_OPTIONS } from '../../utils/excelImport';
 
@@ -84,6 +90,10 @@ export const DashboardTab: React.FC<{
   isExportingDocx?: boolean;
   onSaveScenario?: () => void;
   onOpenGoogleSheetsExport?: () => void;
+  onExportExecutiveMarkdown?: () => void;
+  onExportStructuredCoopJson?: () => void;
+  onOpenGeminiDrawer?: () => void;
+  onOpenChartExportModal?: () => void;
 }> = ({
   onNavigate,
   onExportPdf,
@@ -93,6 +103,10 @@ export const DashboardTab: React.FC<{
   isExportingDocx = false,
   onSaveScenario,
   onOpenGoogleSheetsExport,
+  onExportExecutiveMarkdown,
+  onExportStructuredCoopJson,
+  onOpenGeminiDrawer,
+  onOpenChartExportModal,
 }) => {
   const {
     activeProject,
@@ -125,6 +139,12 @@ export const DashboardTab: React.FC<{
   const [dashboardView, setDashboardView] = useState<
     'overview' | 'treasury' | 'seasonality' | 'market' | 'annual'
   >('overview');
+
+  useEffect(() => {
+    const handleShowOverview = () => setDashboardView('overview');
+    window.addEventListener('riz:dashboard-overview', handleShowOverview);
+    return () => window.removeEventListener('riz:dashboard-overview', handleShowOverview);
+  }, []);
   const [thresholdEditorOpen, setThresholdEditorOpen] = useState<boolean>(false);
   const [mobileView, setMobileView] = useState<'cards' | 'table'>('cards');
   const [simSeason, setSimSeason] = useState<'hauteSaison' | 'basseSaison'>('hauteSaison');
@@ -537,6 +557,18 @@ export const DashboardTab: React.FC<{
       pctNum: safeRatio(y1.annualFixedChargesAr, y1.totalTurnoverAr),
       tone: 'default',
     },
+    ...((y1.annualDepreciationAr ?? 0) > 0
+      ? [
+          {
+            label: '− Dotations aux amortissements (Impact IR)',
+            hsNum: null,
+            bsNum: null,
+            y1Num: y1.annualDepreciationAr ?? 0,
+            pctNum: safeRatio(y1.annualDepreciationAr ?? 0, y1.totalTurnoverAr),
+            tone: 'cost' as const,
+          },
+        ]
+      : []),
     {
       label: '= Bénéfice net avant Impôt (IR)',
       hsNum: hs.seasonNetResultBeforeTaxAr,
@@ -660,6 +692,17 @@ export const DashboardTab: React.FC<{
               <span>PDF personnalisé</span>
             </button>
           )}
+          {onOpenGeminiDrawer && (
+            <button
+              type="button"
+              onClick={onOpenGeminiDrawer}
+              title="Ouvrir le Conseiller Financier IA"
+              className="min-h-11 sm:min-h-10 px-3.5 py-2 rounded-xl border border-indigo-500/35 bg-indigo-500/10 hover:bg-indigo-500/20 text-xs font-semibold text-indigo-800 dark:text-indigo-200 transition-colors inline-flex items-center gap-1.5 whitespace-nowrap"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" aria-hidden="true" />
+              <span>Conseiller IA</span>
+            </button>
+          )}
           <ExportMenu
             onExportExcel={exportToExcel}
             onExportPdf={onExportPdf}
@@ -681,7 +724,10 @@ export const DashboardTab: React.FC<{
               URL.revokeObjectURL(url);
               notify('success', 'Fichier JSON exporté.');
             }}
+            onExportExecutiveMarkdown={onExportExecutiveMarkdown}
+            onExportStructuredCoopJson={onExportStructuredCoopJson}
             onExportGoogleSheets={onOpenGoogleSheetsExport}
+            onOpenChartExportModal={onOpenChartExportModal}
             variant="dashboard"
           />
         </div>
@@ -2238,6 +2284,22 @@ export const DashboardTab: React.FC<{
         </div>
       </div>
 
+      {/* Ratio de Liquidité Générale & Optimisation des Stocks de Paddy avant Décorticage */}
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-stretch">
+        <div className="xl:col-span-5 min-w-0 flex flex-col">
+          <GeneralLiquidityRatioCard />
+        </div>
+        <div className="xl:col-span-7 min-w-0 flex flex-col">
+          <PaddyStockOptimizationChartCard />
+        </div>
+      </div>
+
+      {/* Graphique Waterfall P&L Année 1 */}
+      <ProfitLossWaterfallChart />
+
+      {/* Calendrier interactif de Campagne Agricole & Flux Mensuels */}
+      <CampaignCalendarCard onOpenTreasury={() => setDashboardView('treasury')} />
+
       {/* Statut du Service E-mail (Gmail API) & Journal des Alertes Envoyées (avec export CSV) */}
       <EmailServiceStatusWidget
         onNavigate={onNavigate}
@@ -2571,6 +2633,129 @@ export const DashboardTab: React.FC<{
           </table>
         </div>
       </section>
+
+      {/* État Récapitulatif de la TVA (Collecte, Crédit & Net DGI) */}
+      {model.vatSummary && (
+        <section
+          aria-label="État récapitulatif de la TVA"
+          className="animate-dashboard-card rounded-2xl border border-zinc-200 dark:border-white/[0.08] bg-white dark:bg-[#11101C] overflow-hidden transition-colors duration-200"
+        >
+          <div className="px-5 py-3.5 border-b border-zinc-200 dark:border-white/[0.08] flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-zinc-900 dark:text-white flex items-center gap-2">
+                <Receipt className="w-4 h-4 text-teal-600 dark:text-teal-400 shrink-0" aria-hidden="true" />
+                <span>État Récapitulatif de la TVA — Collecte, Crédit &amp; Net DGI (Année 1)</span>
+              </h2>
+              <span className="text-xs text-zinc-600 dark:text-zinc-400">
+                TVA Intrants : {(model.vatSummary.inputVatRate * 100).toFixed(0)} % · TVA Produits Finis :{' '}
+                {(model.vatSummary.outputVatRate * 100).toFixed(0)} % · Prorata CGI :{' '}
+                {formatPercent(model.vatSummary.prorataDeduction, 0)}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span
+                className={`px-2.5 py-1 rounded-lg border text-[11px] font-semibold ${
+                  y1.vatActive
+                    ? 'border-teal-500/40 bg-teal-500/12 text-teal-800 dark:text-teal-300'
+                    : 'border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-300'
+                }`}
+              >
+                {y1.vatActive
+                  ? 'Intégrée aux états financiers & liquidité'
+                  : 'Simulation seule (activer dans Hypothèses)'}
+              </span>
+              <button
+                type="button"
+                onClick={() => onNavigate('hypotheses')}
+                className="no-print text-xs font-medium text-indigo-700 dark:text-indigo-400 hover:underline"
+              >
+                Configurer →
+              </button>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left border-collapse font-mono tabular-nums">
+              <thead>
+                <tr className="bg-zinc-100/80 dark:bg-[#171627] text-zinc-700 dark:text-zinc-300 font-sans border-b border-zinc-200 dark:border-white/[0.08]">
+                  <th className="py-2.5 px-4 font-semibold">Rubrique fiscale TVA</th>
+                  <th className="py-2.5 px-4 text-right font-semibold">Haute Saison ({hs.months}m)</th>
+                  <th className="py-2.5 px-4 text-right font-semibold">Basse Saison ({bs.months}m)</th>
+                  <th className="py-2.5 px-4 text-right font-semibold text-zinc-900 dark:text-white">
+                    Année 1 / CAPEX
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-100 dark:divide-white/[0.05]">
+                <tr>
+                  <td className="py-2.5 px-4 font-sans text-zinc-800 dark:text-zinc-200">
+                    TVA Collectée sur ventes (Produits finis)
+                  </td>
+                  <td className="py-2.5 px-4 text-right">
+                    {formatAriary(model.vatSummary.hauteSaison.tvaCollecteeAr, { inMillions: inM })}
+                  </td>
+                  <td className="py-2.5 px-4 text-right">
+                    {formatAriary(model.vatSummary.basseSaison.tvaCollecteeAr, { inMillions: inM })}
+                  </td>
+                  <td className="py-2.5 px-4 text-right font-bold text-zinc-900 dark:text-white">
+                    {formatAriary(model.vatSummary.annualTvaCollecteeAr, { inMillions: inM })}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="py-2.5 px-4 font-sans text-zinc-800 dark:text-zinc-200">
+                    TVA Déductible sur intrants &amp; services
+                  </td>
+                  <td className="py-2.5 px-4 text-right text-teal-700 dark:text-teal-400">
+                    {formatAriary(model.vatSummary.hauteSaison.tvaDeductibleOpexAr, { inMillions: inM })}
+                  </td>
+                  <td className="py-2.5 px-4 text-right text-teal-700 dark:text-teal-400">
+                    {formatAriary(model.vatSummary.basseSaison.tvaDeductibleOpexAr, { inMillions: inM })}
+                  </td>
+                  <td className="py-2.5 px-4 text-right font-bold text-teal-700 dark:text-teal-400">
+                    {formatAriary(model.vatSummary.annualTvaDeductibleOpexAr, { inMillions: inM })}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="py-2.5 px-4 font-sans text-zinc-800 dark:text-zinc-200">
+                    Crédit de TVA initial sur CAPEX Matériel
+                  </td>
+                  <td className="py-2.5 px-4 text-right text-zinc-400">—</td>
+                  <td className="py-2.5 px-4 text-right text-zinc-400">—</td>
+                  <td className="py-2.5 px-4 text-right font-bold text-teal-700 dark:text-teal-400">
+                    {formatAriary(model.vatSummary.capexTvaDeductibleAr, { inMillions: inM })}
+                  </td>
+                </tr>
+                <tr>
+                  <td className="py-2.5 px-4 font-sans text-zinc-800 dark:text-zinc-200">
+                    TVA Rémanente non déductible (charge nette)
+                  </td>
+                  <td className="py-2.5 px-4 text-right text-rose-700 dark:text-rose-400">
+                    {formatAriary(model.vatSummary.hauteSaison.tvaRemanenteOpexAr, { inMillions: inM })}
+                  </td>
+                  <td className="py-2.5 px-4 text-right text-rose-700 dark:text-rose-400">
+                    {formatAriary(model.vatSummary.basseSaison.tvaRemanenteOpexAr, { inMillions: inM })}
+                  </td>
+                  <td className="py-2.5 px-4 text-right font-bold text-rose-700 dark:text-rose-400">
+                    {formatAriary(model.vatSummary.annualTvaRemanenteNonDeductibleAr, { inMillions: inM })}
+                  </td>
+                </tr>
+                <tr className="bg-teal-500/10 font-bold border-t border-teal-500/25">
+                  <td className="py-2.5 px-4 font-sans text-zinc-900 dark:text-white">
+                    TVA Nette à reverser à la DGI / Crédit reporté fin d’exercice
+                  </td>
+                  <td className="py-2.5 px-4 text-right text-zinc-500 font-normal">Mensualisé</td>
+                  <td className="py-2.5 px-4 text-right text-zinc-500 font-normal">
+                    Report : {formatAriary(model.vatSummary.yearEndCreditTvaAr, { inMillions: inM })}
+                  </td>
+                  <td className="py-2.5 px-4 text-right text-amber-700 dark:text-amber-300 text-sm">
+                    {formatAriary(model.vatSummary.annualTvaNetteVerseeDgiAr, { inMillions: inM })}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {/* Outil d'IA générative : analyse qualitative & points de vigilance (VAN / TRI) */}
       <AiFinancialAnalysisCard

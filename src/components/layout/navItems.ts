@@ -14,6 +14,8 @@ import {
   Settings,
   Building2,
   Wallet,
+  MapPin,
+  Box,
   LucideIcon,
 } from 'lucide-react';
 
@@ -30,6 +32,8 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'hypotheses', label: 'Hypothèses & Coûts', shortLabel: 'Hypothèses', desc: 'Saisie & Paramètres', icon: Sliders },
   { id: 'partenaires', label: 'Écosystème Partenaires', shortLabel: 'Partenaires', desc: 'Coopératives & Transport', icon: Handshake },
   { id: 'concurrence', label: 'Concurrence', shortLabel: 'Concurrence', desc: 'Prix de revient & Parts marché', icon: Building2 },
+  { id: 'carte', label: 'Carte & Corridors', shortLabel: 'Carte', desc: 'Bassins rizicoles & Corridors', icon: MapPin },
+  { id: 'usine3d', label: 'Rizerie 3D', shortLabel: 'Rizerie 3D', desc: 'Jumeau 3D Usinage & Stock', icon: Box },
   { id: 'scenarios', label: 'Scénarios', shortLabel: 'Scénarios', desc: 'Comparaison 3 axes', icon: GitCompare },
   { id: 'sensibilite', label: 'Sensibilité 2D', shortLabel: 'Sensibilité', desc: 'Matrices & Pas à pas', icon: Grid3X3 },
   { id: 'breakeven', label: 'Seuil de Rentabilité', shortLabel: 'Point Mort', desc: 'Break-even & Clients', icon: Target },
